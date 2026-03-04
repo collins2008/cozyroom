@@ -130,26 +130,40 @@
         const urlParams = new URLSearchParams(window.location.search);
         const roomToJoin = urlParams.get('room');
 
-        // We wrap this so it strictly runs ONLY after the page is fully loaded.
         window.onload = () => {
             const statusEl = document.getElementById('room-status');
             
-            // 1. HARD CHECK: Did the PeerJS library actually download?
             if (typeof Peer === 'undefined') {
-                statusEl.innerText = "ERROR: CDN BLOCKED BY YOUR NETWORK! Turn on VPN.";
+                statusEl.innerText = "ERROR: CDN BLOCKED! Turn on VPN.";
                 statusEl.classList.replace('text-blue-500', 'text-red-500');
                 return;
             }
 
-            statusEl.innerText = "Contacting Server...";
+            statusEl.innerText = "Contacting Server & Relays...";
 
             try {
+                // ADDED FREE TURN SERVERS TO BYPASS STRICT NIGERIAN NETWORKS
                 peer = new Peer({ 
-                    debug: 3,
+                    debug: 2,
                     config: {
                         'iceServers': [
                             { urls: 'stun:stun.l.google.com:19302' },
-                            { urls: 'stun:stun1.l.google.com:19302' }
+                            { urls: 'stun:stun1.l.google.com:19302' },
+                            {
+                                urls: "turn:openrelay.metered.ca:80",
+                                username: "openrelayproject",
+                                credential: "openrelayproject"
+                            },
+                            {
+                                urls: "turn:openrelay.metered.ca:443",
+                                username: "openrelayproject",
+                                credential: "openrelayproject"
+                            },
+                            {
+                                urls: "turn:openrelay.metered.ca:443?transport=tcp",
+                                username: "openrelayproject",
+                                credential: "openrelayproject"
+                            }
                         ]
                     }
                 }); 
@@ -163,8 +177,13 @@
 
                 peer.on('error', (err) => {
                     console.error("PeerJS Error:", err);
-                    statusEl.innerText = "ERROR: " + err.type;
-                    statusEl.classList.replace('text-blue-500', 'text-red-500');
+                    if (err.type === 'peer-unavailable') {
+                        // If they missed the host, retry silently
+                        console.log("Host not found immediately, retrying connection...");
+                    } else {
+                        statusEl.innerText = "ERROR: " + err.type;
+                        statusEl.classList.replace('text-blue-500', 'text-red-500');
+                    }
                 });
 
                 peer.on('connection', (conn) => setupDataConnection(conn));
@@ -173,13 +192,12 @@
                     handleCallStream(call);
                 });
 
-                // 2. TIMEOUT CHECK: If it hangs for 5 seconds, shout!
                 setTimeout(() => {
                     if (!myId) {
                         statusEl.innerText = "BLOCKED BY NETWORK/ISP! Try a VPN.";
                         statusEl.classList.replace('text-blue-500', 'text-red-500');
                     }
-                }, 5000);
+                }, 8000);
 
             } catch (error) {
                 statusEl.innerText = "CRASH: " + error.message;
@@ -217,11 +235,36 @@
                 localStream = new MediaStream();
             }
 
+            // JOINING LOGIC WITH RETRIES
             if (roomToJoin && roomToJoin !== myId) {
-                const conn = peer.connect(roomToJoin, { metadata: profile });
-                setupDataConnection(conn);
-                const call = peer.call(roomToJoin, localStream);
-                handleCallStream(call);
+                let attempts = 0;
+                
+                function attemptConnection() {
+                    appendLog("System", `Connecting to host... (Attempt ${attempts + 1})`);
+                    const conn = peer.connect(roomToJoin, { metadata: profile, reliable: true });
+                    
+                    conn.on('open', () => {
+                        appendLog("System", "Data channel connected!");
+                        setupDataConnection(conn);
+                        
+                        // Only try the media call after data channel succeeds
+                        setTimeout(() => {
+                            const call = peer.call(roomToJoin, localStream);
+                            handleCallStream(call);
+                        }, 500);
+                    });
+
+                    conn.on('error', () => {
+                        attempts++;
+                        if (attempts < 3) {
+                            setTimeout(attemptConnection, 2000); // Retry after 2 seconds
+                        } else {
+                            appendLog("System", "Failed to connect to host. They might have left the room.");
+                        }
+                    });
+                }
+                
+                attemptConnection();
             }
         }
 
@@ -236,13 +279,19 @@
         }
 
         function setupDataConnection(conn) {
-            connections.push(conn);
-            conn.on('open', () => {
-                conn.send({ type: 'profile', data: profile, peerId: myId });
-            });
+            if (!connections.includes(conn)) {
+                connections.push(conn);
+            }
+            
+            // Send profile immediately if open, otherwise wait for open event
             if (conn.open) {
                 conn.send({ type: 'profile', data: profile, peerId: myId });
+            } else {
+                conn.on('open', () => {
+                    conn.send({ type: 'profile', data: profile, peerId: myId });
+                });
             }
+
             conn.on('data', (payload) => {
                 if (payload.type === 'profile') {
                     spawnAvatarUI(payload.peerId, payload.data.name, payload.data.avatar, false);
@@ -259,7 +308,9 @@
         }
 
         function handleCallStream(call) {
-            mediaCalls.push(call);
+            if (!mediaCalls.includes(call)) {
+                mediaCalls.push(call);
+            }
             call.on('stream', (remoteStream) => {
                 let vidEl = document.getElementById(`vid-${call.peer}`);
                 if (!vidEl) {
