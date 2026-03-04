@@ -65,8 +65,7 @@
 
     <div id="main-app" class="hidden w-full h-full relative">
         
-        <div id="video-layer" class="absolute inset-0 z-0 bg-black flex items-center justify-center">
-            </div>
+        <div id="video-layer" class="absolute inset-0 z-0 bg-black flex items-center justify-center"></div>
 
         <header id="header-ui" class="absolute top-6 left-6 right-6 flex justify-between items-start z-[60] pointer-events-none transition-opacity duration-300">
             <div class="flex flex-col gap-3 pointer-events-auto">
@@ -135,6 +134,8 @@
         let isCinemaMode = false;
 
         const avatarMap = { 'duck': '🦆', 'knight': '♘', 'alien': '👾' };
+        
+        // Grab the room ID from the URL properly
         const urlParams = new URLSearchParams(window.location.search);
         const roomToJoin = urlParams.get('room');
 
@@ -183,6 +184,7 @@
                 localStream = new MediaStream();
             }
 
+            // If we have a room code, initiate connection to the host!
             if (roomToJoin && roomToJoin !== myId) {
                 const conn = peer.connect(roomToJoin, { metadata: profile });
                 setupDataConnection(conn);
@@ -191,15 +193,31 @@
             }
         }
 
+        // --- FIXED URL GENERATION ---
         function copyRoomLink() {
-            const link = `${window.location.origin}${window.location.pathname}?room=${myId}`;
+            // Force a trailing slash before the query parameter to prevent GitHub Pages redirects
+            let path = window.location.pathname;
+            if (!path.endsWith('/')) {
+                path += '/';
+            }
+            const link = `${window.location.origin}${path}?room=${myId}`;
             navigator.clipboard.writeText(link);
-            alert("Invite link copied!");
+            alert("Invite link copied! Send it over.");
         }
 
         function setupDataConnection(conn) {
             connections.push(conn);
-            conn.on('open', () => conn.send({ type: 'profile', data: profile, peerId: myId }));
+            
+            // Standard open event
+            conn.on('open', () => {
+                conn.send({ type: 'profile', data: profile, peerId: myId });
+            });
+
+            // Backup check in case the connection is already open when we receive it (Host side fix)
+            if (conn.open) {
+                conn.send({ type: 'profile', data: profile, peerId: myId });
+            }
+
             conn.on('data', (payload) => {
                 if (payload.type === 'profile') {
                     spawnAvatarUI(payload.peerId, payload.data.name, payload.data.avatar, false);
@@ -240,7 +258,6 @@
             connections.forEach(conn => { if(conn.open) conn.send({ type, ...data }); });
         }
 
-        // --- Cinema Mode Logic ---
         function toggleCinemaMode() {
             isCinemaMode = !isCinemaMode;
             const header = document.getElementById('header-ui');
@@ -249,7 +266,6 @@
             const chatInput = document.getElementById('chat-input');
 
             if (isCinemaMode) {
-                // Hide header and media buttons
                 header.classList.add('opacity-0', 'pointer-events-none');
                 mediaDock.classList.add('opacity-0', 'pointer-events-none', 'scale-95');
                 
@@ -259,11 +275,9 @@
                     exitBtn.classList.remove('hidden');
                 }, 300);
 
-                // Make the chat input sleeker and slightly transparent so it doesn't distract
                 chatInput.classList.remove('glass');
                 chatInput.classList.add('bg-black/40', 'backdrop-blur-sm', 'border', 'border-white/10', 'opacity-50');
             } else {
-                // Restore everything
                 header.classList.remove('hidden');
                 mediaDock.classList.remove('hidden');
                 exitBtn.classList.add('hidden');
@@ -273,7 +287,6 @@
                     mediaDock.classList.remove('opacity-0', 'pointer-events-none', 'scale-95');
                 }, 10);
 
-                // Restore chat input style
                 chatInput.classList.remove('bg-black/40', 'backdrop-blur-sm', 'border', 'border-white/10', 'opacity-50');
                 chatInput.classList.add('glass');
             }
@@ -292,7 +305,6 @@
             document.getElementById('vid-btn').innerHTML = `<span class="material-icons text-xl ${isVideoOff ? 'text-red-500' : 'text-gray-400 hover:text-white'}">${isVideoOff ? 'videocam_off' : 'videocam'}</span>`;
         }
 
-        // --- Screen Share Engine ---
         async function startScreenShare() {
             try {
                 screenStream = await navigator.mediaDevices.getDisplayMedia({ 
@@ -401,19 +413,39 @@
         }
 
         function makeDraggable(element) {
-            let isDragging = false, startX, startY;
-            element.addEventListener('mousedown', (e) => {
-                isDragging = true;
-                startX = e.clientX - element.offsetLeft;
-                startY = e.clientY - element.offsetTop;
-            });
-            document.addEventListener('mousemove', (e) => {
-                if (!isDragging) return;
+            let startX = 0, startY = 0;
+
+            element.onmousedown = dragMouseDown;
+
+            function dragMouseDown(e) {
+                e = e || window.event;
                 e.preventDefault();
-                element.style.left = `${e.clientX - startX}px`;
-                element.style.top = `${e.clientY - startY}px`;
-            });
-            document.addEventListener('mouseup', () => { isDragging = false; });
+                startX = e.clientX;
+                startY = e.clientY;
+
+                document.querySelectorAll('.draggable-avatar').forEach(el => el.style.zIndex = '20');
+                element.style.zIndex = '50';
+
+                document.onmouseup = closeDragElement;
+                document.onmousemove = elementDrag;
+            }
+
+            function elementDrag(e) {
+                e = e || window.event;
+                e.preventDefault();
+                let dx = startX - e.clientX;
+                let dy = startY - e.clientY;
+                startX = e.clientX;
+                startY = e.clientY;
+
+                element.style.top = (element.offsetTop - dy) + "px";
+                element.style.left = (element.offsetLeft - dx) + "px";
+            }
+
+            function closeDragElement() {
+                document.onmouseup = null;
+                document.onmousemove = null;
+            }
         }
 
         function spawnAvatarUI(id, name, avatarType, isLocal) {
@@ -424,10 +456,12 @@
             outerWrapper.id = `avatar-${id}`;
             outerWrapper.className = `draggable-avatar pointer-events-auto`;
             
-            const startX = isLocal ? window.innerWidth / 2 : window.innerWidth * Math.random();
-            const startY = isLocal ? window.innerHeight / 2 : window.innerHeight * Math.random();
-            outerWrapper.style.left = `${startX - 30}px`; 
-            outerWrapper.style.top = `${startY - 30}px`;
+            const centerX = window.innerWidth / 2;
+            const centerY = window.innerHeight / 2;
+            const offsetX = isLocal ? -40 : 40; 
+            
+            outerWrapper.style.left = `${(centerX + offsetX) - 30}px`; 
+            outerWrapper.style.top = `${centerY - 30}px`;
 
             const innerWrapper = document.createElement('div');
             innerWrapper.id = `avatar-inner-${id}`;
