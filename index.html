@@ -7,7 +7,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js" 
+            onerror="document.getElementById('room-status').innerText = 'ERROR: NETWORK BLOCKED THE LIBRARY! Turn on VPN.'; document.getElementById('room-status').classList.replace('text-blue-500', 'text-red-500');">
+    </script>
 
     <script>
         tailwind.config = {
@@ -21,22 +24,13 @@
     </script>
 
     <style>
-        /* Pure Dark Aesthetic */
         body { overflow: hidden; background-color: #000000; color: white; }
         .glass { background: rgba(10, 10, 10, 0.7); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); }
-        
-        /* Floating Inner Animation */
         @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
         .animate-float { animation: float 4s ease-in-out infinite; }
-        
-        /* Voice Glow */
         .speaking { box-shadow: 0 0 20px 3px rgba(59, 130, 246, 0.9); border-color: #3b82f6 !important; }
-
-        /* Draggable Wrapper */
         .draggable-avatar { position: absolute; cursor: grab; z-index: 20; user-select: none; }
         .draggable-avatar:active { cursor: grabbing; z-index: 50; }
-
-        /* Custom Scrollbar */
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
@@ -47,7 +41,7 @@
     <div id="login-screen" class="absolute inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-xl transition-opacity duration-500">
         <div class="glass p-10 rounded-3xl w-full max-w-md text-center flex flex-col items-center border border-white/5">
             <h1 class="text-3xl font-black text-white mb-2 tracking-tight">Vibe Space</h1>
-            <p id="room-status" class="text-blue-500 font-bold mb-8 text-xs uppercase tracking-widest">Initializing Network...</p>
+            <p id="room-status" class="text-blue-500 font-bold mb-8 text-xs uppercase tracking-widest">INITIALIZING NETWORK...</p>
             
             <input type="text" id="username" placeholder="Collins" class="w-full px-6 py-4 rounded-2xl bg-[#0a0a0a] text-white border border-gray-800 focus:border-blue-500 outline-none text-lg mb-8 shadow-inner font-bold placeholder-gray-600">
             
@@ -64,7 +58,6 @@
     </div>
 
     <div id="main-app" class="hidden w-full h-full relative">
-        
         <div id="video-layer" class="absolute inset-0 z-0 bg-black flex items-center justify-center"></div>
 
         <header id="header-ui" class="absolute top-6 left-6 right-6 flex justify-between items-start z-[60] pointer-events-none transition-opacity duration-300">
@@ -95,7 +88,6 @@
         <div id="avatar-space" class="absolute inset-0 z-20 pointer-events-none"></div>
 
         <div id="bottom-ui" class="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-3 z-[60] w-full max-w-xl px-6 pointer-events-none">
-            
             <div id="chat-log" class="w-full h-20 overflow-y-auto text-[11px] font-bold flex flex-col gap-1 pointer-events-auto mask-image: linear-gradient(to top, black 80%, transparent); text-shadow: 0 1px 2px rgba(0,0,0,0.8);"></div>
 
             <div class="flex gap-2 w-full pointer-events-auto items-center">
@@ -135,17 +127,32 @@
 
         const avatarMap = { 'duck': '🦆', 'knight': '♘', 'alien': '👾' };
         
-        // Grab the room ID from the URL properly
         const urlParams = new URLSearchParams(window.location.search);
         const roomToJoin = urlParams.get('room');
 
-function initNetwork() {
+        // We wrap this so it strictly runs ONLY after the page is fully loaded.
+        window.onload = () => {
             const statusEl = document.getElementById('room-status');
-            statusEl.innerText = "Contacting Server...";
             
+            // 1. HARD CHECK: Did the PeerJS library actually download?
+            if (typeof Peer === 'undefined') {
+                statusEl.innerText = "ERROR: CDN BLOCKED BY YOUR NETWORK! Turn on VPN.";
+                statusEl.classList.replace('text-blue-500', 'text-red-500');
+                return;
+            }
+
+            statusEl.innerText = "Contacting Server...";
+
             try {
-                // Initialize with max debugging enabled
-                peer = new Peer({ debug: 3 }); 
+                peer = new Peer({ 
+                    debug: 3,
+                    config: {
+                        'iceServers': [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' }
+                        ]
+                    }
+                }); 
                 
                 peer.on('open', (id) => {
                     myId = id;
@@ -154,80 +161,31 @@ function initNetwork() {
                     document.getElementById('join-btn').disabled = false;
                 });
 
-                // CATCH ALL ERRORS AND PRINT TO SCREEN
                 peer.on('error', (err) => {
                     console.error("PeerJS Error:", err);
-                    statusEl.innerText = "Error: " + err.type;
+                    statusEl.innerText = "ERROR: " + err.type;
                     statusEl.classList.replace('text-blue-500', 'text-red-500');
                 });
 
-                peer.on('disconnected', () => {
-                    statusEl.innerText = "Disconnected from server.";
-                    statusEl.classList.replace('text-blue-500', 'text-red-500');
-                    peer.reconnect();
+                peer.on('connection', (conn) => setupDataConnection(conn));
+                peer.on('call', (call) => {
+                    call.answer(localStream); 
+                    handleCallStream(call);
                 });
 
-                // TIMEOUT CHECK: If it hangs for 5 seconds, it's an ISP block
+                // 2. TIMEOUT CHECK: If it hangs for 5 seconds, shout!
                 setTimeout(() => {
                     if (!myId) {
-                        statusEl.innerText = "Blocked by Network/ISP!";
+                        statusEl.innerText = "BLOCKED BY NETWORK/ISP! Try a VPN.";
                         statusEl.classList.replace('text-blue-500', 'text-red-500');
                     }
                 }, 5000);
 
             } catch (error) {
-                statusEl.innerText = "Crash: " + error.message;
+                statusEl.innerText = "CRASH: " + error.message;
                 statusEl.classList.replace('text-blue-500', 'text-red-500');
             }
-        }
-            
-            // 3. Success Handler
-            peer.on('open', (id) => {
-                myId = id;
-                const statusEl = document.getElementById('room-status');
-                statusEl.innerText = "Network Ready";
-                statusEl.classList.replace('text-blue-500', 'text-green-500');
-                document.getElementById('join-btn').disabled = false;
-            });
-
-            // 4. ERROR HANDLER (So it never gets stuck silently again!)
-            peer.on('error', (err) => {
-                console.error("Network Error:", err);
-                const statusEl = document.getElementById('room-status');
-                statusEl.innerText = "Connection Failed. Retrying...";
-                statusEl.classList.replace('text-blue-500', 'text-red-500');
-                
-                // Try to force a reconnect if the network drops
-                setTimeout(() => {
-                    if(peer.disconnected) peer.reconnect();
-                }, 3000);
-            });
-
-            peer.on('connection', (conn) => setupDataConnection(conn));
-            peer.on('call', (call) => {
-                call.answer(localStream); 
-                handleCallStream(call);
-            });
-        }
-            
-            peer.on('open', (id) => {
-                myId = id;
-                document.getElementById('room-status').innerText = "Network Ready";
-                document.getElementById('join-btn').disabled = false;
-            });
-            peer.on('connection', (conn) => setupDataConnection(conn));
-            peer.on('call', (call) => {
-                call.answer(localStream); 
-                handleCallStream(call);
-            });
-        }
-            peer.on('connection', (conn) => setupDataConnection(conn));
-            peer.on('call', (call) => {
-                call.answer(localStream); 
-                handleCallStream(call);
-            });
-        }
-        initNetwork();
+        };
 
         function selectAvatar(type) {
             profile.avatar = type;
@@ -259,7 +217,6 @@ function initNetwork() {
                 localStream = new MediaStream();
             }
 
-            // If we have a room code, initiate connection to the host!
             if (roomToJoin && roomToJoin !== myId) {
                 const conn = peer.connect(roomToJoin, { metadata: profile });
                 setupDataConnection(conn);
@@ -268,9 +225,7 @@ function initNetwork() {
             }
         }
 
-        // --- FIXED URL GENERATION ---
         function copyRoomLink() {
-            // Force a trailing slash before the query parameter to prevent GitHub Pages redirects
             let path = window.location.pathname;
             if (!path.endsWith('/')) {
                 path += '/';
@@ -282,17 +237,12 @@ function initNetwork() {
 
         function setupDataConnection(conn) {
             connections.push(conn);
-            
-            // Standard open event
             conn.on('open', () => {
                 conn.send({ type: 'profile', data: profile, peerId: myId });
             });
-
-            // Backup check in case the connection is already open when we receive it (Host side fix)
             if (conn.open) {
                 conn.send({ type: 'profile', data: profile, peerId: myId });
             }
-
             conn.on('data', (payload) => {
                 if (payload.type === 'profile') {
                     spawnAvatarUI(payload.peerId, payload.data.name, payload.data.avatar, false);
@@ -489,22 +439,17 @@ function initNetwork() {
 
         function makeDraggable(element) {
             let startX = 0, startY = 0;
-
             element.onmousedown = dragMouseDown;
-
             function dragMouseDown(e) {
                 e = e || window.event;
                 e.preventDefault();
                 startX = e.clientX;
                 startY = e.clientY;
-
                 document.querySelectorAll('.draggable-avatar').forEach(el => el.style.zIndex = '20');
                 element.style.zIndex = '50';
-
                 document.onmouseup = closeDragElement;
                 document.onmousemove = elementDrag;
             }
-
             function elementDrag(e) {
                 e = e || window.event;
                 e.preventDefault();
@@ -512,11 +457,9 @@ function initNetwork() {
                 let dy = startY - e.clientY;
                 startX = e.clientX;
                 startY = e.clientY;
-
                 element.style.top = (element.offsetTop - dy) + "px";
                 element.style.left = (element.offsetLeft - dx) + "px";
             }
-
             function closeDragElement() {
                 document.onmouseup = null;
                 document.onmousemove = null;
