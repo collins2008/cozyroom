@@ -3,14 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vibe Space - Diagnostics</title>
+    <title>Vibe Space - Agora Premium Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+    
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.1.js"></script>
+    <script src="https://download.agora.io/sdk/release/agora-rtm-sdk-1.5.1.js"></script>
+
     <script>
-        tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: { 'cute': ['Nunito', 'sans-serif'], 'pixel': ['"Press Start 2P"', 'cursive'] } } } }
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { 'cute': ['Nunito', 'sans-serif'], 'pixel': ['"Press Start 2P"', 'cursive'] }
+                }
+            }
+        }
     </script>
+
     <style>
         body { overflow: hidden; background-color: #000000; color: white; }
         .glass { background: rgba(10, 10, 10, 0.7); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); }
@@ -22,6 +33,9 @@
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
+        
+        /* Agora injects videos inside divs, so we make sure they fit */
+        #local-video video { object-fit: cover !important; border-radius: 0.75rem; }
     </style>
 </head>
 <body class="font-cute h-screen w-screen relative">
@@ -29,45 +43,63 @@
     <div id="login-screen" class="absolute inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-xl transition-opacity duration-500">
         <div class="glass p-10 rounded-3xl w-full max-w-md text-center flex flex-col items-center border border-white/5">
             <h1 class="text-3xl font-black text-white mb-2 tracking-tight">Vibe Space</h1>
-            <p id="room-status" class="text-blue-500 font-bold mb-8 text-xs uppercase tracking-widest">INITIALIZING NETWORK...</p>
+            <p id="room-status" class="text-green-500 font-bold mb-8 text-xs uppercase tracking-widest">AGORA ENGINE READY</p>
+            
             <input type="text" id="username" placeholder="Collins" class="w-full px-6 py-4 rounded-2xl bg-[#0a0a0a] text-white border border-gray-800 focus:border-blue-500 outline-none text-lg mb-8 shadow-inner font-bold placeholder-gray-600">
+            
             <div class="flex gap-4 mb-10">
                 <button onclick="selectAvatar('duck')" id="btn-duck" class="avatar-btn w-16 h-16 rounded-2xl bg-[#111] border-2 border-transparent hover:border-blue-500 flex items-center justify-center text-3xl transition-all shadow-lg">🦆</button>
                 <button onclick="selectAvatar('knight')" id="btn-knight" class="avatar-btn w-16 h-16 rounded-2xl bg-[#111] border-2 border-transparent hover:border-blue-500 flex items-center justify-center text-3xl transition-all shadow-lg">♘</button>
                 <button onclick="selectAvatar('alien')" id="btn-alien" class="avatar-btn w-16 h-16 rounded-2xl bg-[#111] border-2 border-transparent hover:border-blue-500 flex items-center justify-center text-3xl transition-all shadow-lg">👾</button>
             </div>
-            <button onclick="enterSpace()" id="join-btn" disabled class="w-full bg-white text-black hover:bg-gray-200 disabled:bg-gray-800 disabled:text-gray-500 font-black text-lg py-4 rounded-2xl transition-all shadow-xl">Enter Space</button>
+
+            <button onclick="enterSpace()" id="join-btn" class="w-full bg-white text-black hover:bg-gray-200 font-black text-lg py-4 rounded-2xl transition-all shadow-xl">
+                Enter Space
+            </button>
         </div>
     </div>
 
     <div id="main-app" class="hidden w-full h-full relative">
+        
         <div id="video-layer" class="absolute inset-0 z-0 bg-black flex items-center justify-center"></div>
 
-        <header id="header-ui" class="absolute top-6 left-6 right-6 flex justify-between items-start z-[60] pointer-events-none transition-opacity duration-300">
+        <header id="header-ui" class="absolute top-6 left-6 right-6 flex justify-between items-start z-[60] transition-opacity duration-300 pointer-events-none">
             <div class="flex flex-col gap-3 pointer-events-auto">
                 <div class="glass flex items-center gap-3 px-4 py-3 rounded-2xl">
                     <div class="text-lg animate-pulse">📻</div>
-                    <div class="w-32 overflow-hidden font-pixel text-[8px] text-gray-300"><marquee scrollamount="3">Now Playing: Dave - Starlight 🎵</marquee></div>
+                    <div class="w-32 overflow-hidden font-pixel text-[8px] text-gray-300">
+                        <marquee scrollamount="3">Now Playing: Dave - Starlight 🎵</marquee>
+                    </div>
                 </div>
-                <button onclick="copyRoomLink()" class="glass px-4 py-2 rounded-xl text-xs font-bold text-gray-300 hover:text-white transition-colors flex items-center gap-2"><span class="material-icons text-sm">link</span> Copy Invite Link</button>
+                <button onclick="copyRoomLink()" class="glass px-4 py-2 rounded-xl text-xs font-bold text-gray-300 hover:text-white transition-colors flex items-center gap-2">
+                    <span class="material-icons text-sm">link</span> Copy Invite Link
+                </button>
             </div>
+
             <div class="flex flex-col items-end gap-3 pointer-events-auto">
-                <button onclick="toggleLowData()" id="data-btn" class="glass px-3 py-2 rounded-xl font-bold text-green-500 hover:bg-white/5 transition-all flex items-center gap-2 text-[10px] uppercase tracking-wider"><span class="material-icons text-sm">network_check</span> <span id="data-text">Stable</span></button>
-                <video id="local-video" class="w-32 h-24 object-cover rounded-xl border border-gray-800 bg-[#0a0a0a] shadow-xl" autoplay muted playsinline></video>
+                <button onclick="toggleLowData()" id="data-btn" class="glass px-3 py-2 rounded-xl font-bold text-green-500 hover:bg-white/5 transition-all flex items-center gap-2 text-[10px] uppercase tracking-wider">
+                    <span class="material-icons text-sm">network_check</span> <span id="data-text">Stable</span>
+                </button>
+                <div id="local-video" class="w-32 h-24 overflow-hidden rounded-xl border border-gray-800 bg-[#0a0a0a] shadow-xl"></div>
             </div>
         </header>
 
-        <button onclick="toggleCinemaMode()" id="cinema-exit-btn" class="hidden absolute top-6 right-6 z-[70] glass px-4 py-2 rounded-xl font-bold text-white hover:bg-white/10 transition-all flex items-center gap-2 text-xs shadow-2xl"><span class="material-icons text-sm">close_fullscreen</span> Exit Cinema Mode</button>
+        <button onclick="toggleCinemaMode()" id="cinema-exit-btn" class="hidden absolute top-6 right-6 z-[70] glass px-4 py-2 rounded-xl font-bold text-white hover:bg-white/10 transition-all flex items-center gap-2 text-xs shadow-2xl">
+            <span class="material-icons text-sm">close_fullscreen</span> Exit Cinema Mode
+        </button>
 
         <div id="avatar-space" class="absolute inset-0 z-20 pointer-events-none"></div>
 
         <div id="bottom-ui" class="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-3 z-[60] w-full max-w-xl px-6 pointer-events-none">
-            <div id="chat-log" class="w-full h-24 overflow-y-auto text-[11px] font-bold flex flex-col gap-1 pointer-events-auto mask-image: linear-gradient(to top, black 80%, transparent); text-shadow: 0 1px 2px rgba(0,0,0,0.8);"></div>
+            
+            <div id="chat-log" class="w-full h-20 overflow-y-auto text-[11px] font-bold flex flex-col gap-1 pointer-events-auto mask-image: linear-gradient(to top, black 80%, transparent); text-shadow: 0 1px 2px rgba(0,0,0,0.8);"></div>
 
             <div class="flex gap-2 w-full pointer-events-auto items-center">
                 <form onsubmit="sendChat(event)" class="flex-1 relative transition-all duration-300">
                     <input type="text" id="chat-input" placeholder="Type a thought..." class="w-full glass py-3 px-5 rounded-2xl text-white placeholder-gray-500 outline-none font-bold focus:border-white/30 transition-all text-sm shadow-xl focus:opacity-100 hover:opacity-100">
-                    <button type="submit" class="absolute right-1 top-1 hover:bg-white/10 text-white p-2 rounded-xl transition-all"><span class="material-icons text-sm">send</span></button>
+                    <button type="submit" class="absolute right-1 top-1 hover:bg-white/10 text-white p-2 rounded-xl transition-all">
+                        <span class="material-icons text-sm">send</span>
+                    </button>
                 </form>
 
                 <div id="media-dock" class="glass px-5 py-2 rounded-2xl flex items-center gap-4 shadow-xl transition-all duration-300 origin-right">
@@ -84,13 +116,29 @@
     </div>
 
     <script>
-        let myId = null;
-        let peer = null;
-        let localStream = null;
-        let screenStream = null;
-        let connections = []; 
-        let mediaCalls = [];  
-        
+        // ==========================================
+        // PUT YOUR AGORA APP ID HERE ↓↓↓
+        // ==========================================
+        const AGORA_APP_ID = "YOUR_APP_ID_HERE"; 
+        // ==========================================
+
+        const rtc = {
+            client: null,
+            localAudioTrack: null,
+            localVideoTrack: null,
+            screenVideoTrack: null,
+            screenAudioTrack: null,
+        };
+
+        const rtm = {
+            client: null,
+            channel: null
+        };
+
+        // Agora strictly uses numbers for RTC UIDs, and strings for RTM.
+        const myIdNum = Math.floor(Math.random() * 1000000);
+        const myIdStr = myIdNum.toString(); 
+
         let profile = { name: "Guest", avatar: "duck" };
         let isLowData = false;
         let isAudioMuted = false;
@@ -99,55 +147,11 @@
 
         const avatarMap = { 'duck': '🦆', 'knight': '♘', 'alien': '👾' };
         
-        const urlParams = new URLSearchParams(window.location.search);
-        const roomToJoin = urlParams.get('room');
-
-        window.onload = () => {
-            const statusEl = document.getElementById('room-status');
-            
-            if (typeof Peer === 'undefined') {
-                statusEl.innerText = "ERROR: CDN BLOCKED! Turn on VPN.";
-                statusEl.classList.replace('text-blue-500', 'text-red-500');
-                return;
-            }
-
-            try {
-                peer = new Peer({ 
-                    debug: 2,
-                    config: {
-                        'iceServers': [
-                            { urls: 'stun:stun.l.google.com:19302' },
-                            { urls: 'stun:stun1.l.google.com:19302' },
-                            { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
-                            { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
-                            { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
-                        ]
-                    }
-                }); 
-                
-                peer.on('open', (id) => {
-                    myId = id;
-                    statusEl.innerText = "Network Ready!";
-                    statusEl.classList.replace('text-blue-500', 'text-green-500');
-                    document.getElementById('join-btn').disabled = false;
-                });
-
-                peer.on('error', (err) => {
-                    console.error("PeerJS Error:", err);
-                    appendLog("System Error", err.type);
-                });
-
-                peer.on('connection', (conn) => setupDataConnection(conn));
-                peer.on('call', (call) => {
-                    appendLog("System", "Incoming call from friend!");
-                    call.answer(localStream); 
-                    handleCallStream(call);
-                });
-
-            } catch (error) {
-                statusEl.innerText = "CRASH: " + error.message;
-            }
-        };
+        // Channel Logic (No redirects!)
+        let roomName = new URLSearchParams(window.location.search).get('room');
+        if(!roomName) {
+            roomName = 'vibe_' + Math.random().toString(36).substr(2, 6);
+        }
 
         function selectAvatar(type) {
             profile.avatar = type;
@@ -156,6 +160,11 @@
         }
 
         async function enterSpace() {
+            if (AGORA_APP_ID === "YOUR_APP_ID_HERE") {
+                alert("Omo! You forgot to paste your Agora App ID into the code! 😭");
+                return;
+            }
+
             const inputName = document.getElementById('username').value.trim();
             if(inputName) profile.name = inputName;
             if(!profile.avatar) return alert("Select an avatar!");
@@ -164,105 +173,117 @@
             setTimeout(() => {
                 document.getElementById('login-screen').classList.add('hidden');
                 document.getElementById('main-app').classList.remove('hidden');
-                spawnAvatarUI(myId, profile.name, profile.avatar, true);
+                spawnAvatarUI(myIdStr, profile.name, profile.avatar, true);
             }, 500);
 
             try {
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { echoCancellation: true, noiseSuppression: true },
-                    video: { width: { ideal: 320 }, frameRate: { ideal: 15 } }
+                // 1. Initialize Agora RTC (Audio/Video)
+                rtc.client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+                
+                // Agora handles VAD internally! It's much cleaner.
+                rtc.client.enableAudioVolumeIndicator();
+                rtc.client.on("volume-indicator", volumes => {
+                    volumes.forEach((volume) => {
+                        const ring = document.getElementById(`ring-${volume.uid}`);
+                        if (ring) {
+                            if (volume.level > 10) ring.classList.add('speaking');
+                            else ring.classList.remove('speaking');
+                        }
+                    });
                 });
-                document.getElementById('local-video').srcObject = localStream;
-                monitorVoiceActivity(localStream, myId);
-            } catch (err) {
-                appendLog("System", "Camera/Mic not found or blocked.");
-                localStream = new MediaStream();
-            }
 
-            if (roomToJoin && roomToJoin !== myId) {
-                appendLog("System", "Attempting to contact host signaling server...");
-                
-                // Removed reliable: true as it causes hangs on strict NATs
-                const conn = peer.connect(roomToJoin, { metadata: profile });
-                
-                conn.on('open', () => {
-                    appendLog("System", "Signaling connected! Handshaking data...");
-                    setupDataConnection(conn);
+                // Listen for friends publishing video/audio
+                rtc.client.on("user-published", async (user, mediaType) => {
+                    await rtc.client.subscribe(user, mediaType);
                     
-                    setTimeout(() => {
-                        appendLog("System", "Initiating media call...");
-                        const call = peer.call(roomToJoin, localStream);
-                        handleCallStream(call);
-                    }, 500);
+                    if (mediaType === "video") {
+                        const remoteVideoTrack = user.videoTrack;
+                        let player = document.getElementById(`remote-player-${user.uid}`);
+                        if (!player) {
+                            player = document.createElement("div");
+                            player.id = `remote-player-${user.uid}`;
+                            player.className = "w-full h-full absolute inset-0";
+                            document.getElementById("video-layer").appendChild(player);
+                        }
+                        // Play remote video into the background layer
+                        remoteVideoTrack.play(player.id, { fit: "contain" });
+                    }
+                    
+                    if (mediaType === "audio") {
+                        user.audioTrack.play();
+                    }
                 });
 
-                conn.on('error', (err) => {
-                    appendLog("System", "Data connection failed: " + err);
+                rtc.client.on("user-unpublished", (user, mediaType) => {
+                    if(mediaType === "video") {
+                        const player = document.getElementById(`remote-player-${user.uid}`);
+                        if(player) player.remove();
+                    }
                 });
+
+                rtc.client.on("user-left", (user) => {
+                    const el = document.getElementById(`avatar-${user.uid}`);
+                    if(el) el.remove();
+                    appendLog("System", "Someone disconnected.");
+                });
+
+                // 2. Initialize Agora RTM (Chat & Data)
+                rtm.client = AgoraRTM.createInstance(AGORA_APP_ID);
+                await rtm.client.login({ uid: myIdStr });
+                
+                rtm.channel = rtm.client.createChannel(roomName);
+                await rtm.channel.join();
+
+                rtm.channel.on('ChannelMessage', ({ text }, senderId) => {
+                    const data = JSON.parse(text);
+                    if(data.type === 'profile') {
+                        spawnAvatarUI(senderId, data.data.name, data.data.avatar, false);
+                    } else if(data.type === 'chat') {
+                        showSpeechBubble(senderId, data.msg);
+                        appendLog(data.sender, data.msg);
+                    } else if(data.type === 'request_profiles') {
+                        // Someone new joined, tell them our profile
+                        rtm.channel.sendMessage({ text: JSON.stringify({ type: 'profile', data: profile }) });
+                    }
+                });
+
+                // 3. Join the RTC Channel
+                await rtc.client.join(AGORA_APP_ID, roomName, null, myIdNum);
+
+                // 4. Create Local Tracks
+                rtc.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+                rtc.localVideoTrack = await AgoraRTC.createCameraVideoTrack({
+                    encoderConfig: "360p_1" // Optimized for standard web
+                });
+
+                // Play local video in the PiP container
+                rtc.localVideoTrack.play("local-video");
+                
+                // Publish local tracks to the room
+                await rtc.client.publish([rtc.localAudioTrack, rtc.localVideoTrack]);
+
+                // 5. Broadcast our profile to anyone already in the room
+                rtm.channel.sendMessage({ text: JSON.stringify({ type: 'profile', data: profile }) });
+                // Ask anyone already there to send us theirs
+                rtm.channel.sendMessage({ text: JSON.stringify({ type: 'request_profiles' }) });
+
+                appendLog("System", "Connected via Agora Premium Network.");
+
+            } catch (err) {
+                console.error("Agora Error:", err);
+                appendLog("System Error", err.message);
             }
         }
 
         function copyRoomLink() {
             let path = window.location.pathname;
             if (!path.endsWith('/')) { path += '/'; }
-            const link = `${window.location.origin}${path}?room=${myId}`;
+            const link = `${window.location.origin}${path}?room=${roomName}`;
             navigator.clipboard.writeText(link);
-            alert("Invite link copied!");
+            alert("Invite link copied! Send it over.");
         }
 
-        function setupDataConnection(conn) {
-            if (!connections.includes(conn)) connections.push(conn);
-            
-            if (conn.open) {
-                conn.send({ type: 'profile', data: profile, peerId: myId });
-            } else {
-                conn.on('open', () => conn.send({ type: 'profile', data: profile, peerId: myId }));
-            }
-
-            conn.on('data', (payload) => {
-                if (payload.type === 'profile') {
-                    spawnAvatarUI(payload.peerId, payload.data.name, payload.data.avatar, false);
-                    appendLog("System", `${payload.data.name} fully connected!`);
-                } 
-                else if (payload.type === 'chat') {
-                    showSpeechBubble(payload.peerId, payload.msg);
-                    appendLog(payload.sender, payload.msg);
-                }
-            });
-            conn.on('close', () => {
-                const el = document.getElementById(`avatar-${conn.peer}`);
-                if(el) el.remove();
-                appendLog("System", "Friend disconnected.");
-            });
-        }
-
-        function handleCallStream(call) {
-            if (!mediaCalls.includes(call)) mediaCalls.push(call);
-            
-            call.on('stream', (remoteStream) => {
-                appendLog("System", "Media stream received successfully!");
-                let vidEl = document.getElementById(`vid-${call.peer}`);
-                if (!vidEl) {
-                    vidEl = document.createElement('video');
-                    vidEl.id = `vid-${call.peer}`;
-                    vidEl.className = "w-full h-full object-contain absolute inset-0";
-                    vidEl.autoplay = true;
-                    vidEl.playsinline = true;
-                    document.getElementById('video-layer').appendChild(vidEl);
-                }
-                vidEl.srcObject = remoteStream;
-                monitorVoiceActivity(remoteStream, call.peer);
-            });
-            call.on('error', (err) => appendLog("System", "Call error: " + err));
-            call.on('close', () => {
-                const vidEl = document.getElementById(`vid-${call.peer}`);
-                if(vidEl) vidEl.remove();
-            });
-        }
-
-        function broadcastData(type, data) {
-            connections.forEach(conn => { if(conn.open) conn.send({ type, ...data }); });
-        }
+        // --- Controls & UI ---
 
         function toggleCinemaMode() {
             isCinemaMode = !isCinemaMode;
@@ -289,82 +310,107 @@
 
         function toggleMic() {
             isAudioMuted = !isAudioMuted;
-            if(localStream) localStream.getAudioTracks().forEach(t => t.enabled = !isAudioMuted);
+            if(rtc.localAudioTrack) rtc.localAudioTrack.setMuted(isAudioMuted);
             document.getElementById('mic-btn').innerHTML = `<span class="material-icons text-xl ${isAudioMuted ? 'text-red-500' : 'text-gray-400 hover:text-white'}">${isAudioMuted ? 'mic_off' : 'mic'}</span>`;
         }
 
         function toggleVid() {
             if(isLowData) return; 
             isVideoOff = !isVideoOff;
-            if(localStream) localStream.getVideoTracks().forEach(t => t.enabled = !isVideoOff);
+            if(rtc.localVideoTrack) rtc.localVideoTrack.setMuted(isVideoOff);
             document.getElementById('vid-btn').innerHTML = `<span class="material-icons text-xl ${isVideoOff ? 'text-red-500' : 'text-gray-400 hover:text-white'}">${isVideoOff ? 'videocam_off' : 'videocam'}</span>`;
-        }
-
-        async function startScreenShare() {
-            try {
-                screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: 1920 }, frameRate: { ideal: 30 } }, audio: true });
-                const screenVideoTrack = screenStream.getVideoTracks()[0];
-                const screenAudioTrack = screenStream.getAudioTracks()[0]; 
-
-                let myBigScreen = document.getElementById('my-big-screen');
-                if(!myBigScreen) {
-                    myBigScreen = document.createElement('video');
-                    myBigScreen.id = 'my-big-screen';
-                    myBigScreen.className = "w-full h-full object-contain absolute inset-0 z-10 bg-black";
-                    myBigScreen.autoplay = true;
-                    myBigScreen.muted = true; 
-                    document.getElementById('video-layer').appendChild(myBigScreen);
-                }
-                myBigScreen.srcObject = screenStream;
-
-                mediaCalls.forEach(call => {
-                    const videoSender = call.peerConnection.getSenders().find(s => s.track.kind === 'video');
-                    if(videoSender && screenVideoTrack) videoSender.replaceTrack(screenVideoTrack);
-                    if (screenAudioTrack) {
-                        const audioSender = call.peerConnection.getSenders().find(s => s.track.kind === 'audio');
-                        if(audioSender) audioSender.replaceTrack(screenAudioTrack);
-                    }
-                });
-
-                if(!isCinemaMode) toggleCinemaMode();
-
-                screenVideoTrack.onended = () => {
-                    if(myBigScreen) myBigScreen.remove();
-                    const camVideoTrack = localStream.getVideoTracks()[0];
-                    const camAudioTrack = localStream.getAudioTracks()[0];
-                    mediaCalls.forEach(call => {
-                        const videoSender = call.peerConnection.getSenders().find(s => s.track.kind === 'video');
-                        if(videoSender && camVideoTrack) videoSender.replaceTrack(camVideoTrack);
-                        const audioSender = call.peerConnection.getSenders().find(s => s.track.kind === 'audio');
-                        if(audioSender && camAudioTrack) audioSender.replaceTrack(camAudioTrack);
-                    });
-                };
-            } catch (err) { console.log("Screenshare aborted:", err); }
         }
 
         function toggleLowData() {
             isLowData = !isLowData;
             const btn = document.getElementById('data-btn');
             const text = document.getElementById('data-text');
+            
             if (isLowData) {
                 btn.classList.replace('text-green-500', 'text-red-500');
                 text.innerText = "Low Data";
-                if(localStream) localStream.getVideoTracks().forEach(t => t.enabled = false);
+                // Completely halt sending video packets
+                if(rtc.localVideoTrack) rtc.localVideoTrack.setEnabled(false);
             } else {
                 btn.classList.replace('text-red-500', 'text-green-500');
                 text.innerText = "Stable";
-                if(localStream && !isVideoOff) localStream.getVideoTracks().forEach(t => t.enabled = true);
+                if(rtc.localVideoTrack && !isVideoOff) rtc.localVideoTrack.setEnabled(true);
             }
         }
 
+        // --- Agora Screen Share Engine ---
+        async function startScreenShare() {
+            if (!rtc.screenVideoTrack) {
+                try {
+                    // Create screen track (asks user for permission)
+                    const screenTracks = await AgoraRTC.createScreenVideoTrack({
+                        encoderConfig: "1080p_1",
+                        optimizationMode: "detail"
+                    }, "auto"); // "auto" requests audio as well
+
+                    if (Array.isArray(screenTracks)) {
+                        rtc.screenVideoTrack = screenTracks[0];
+                        rtc.screenAudioTrack = screenTracks[1];
+                    } else {
+                        rtc.screenVideoTrack = screenTracks;
+                    }
+
+                    // Unpublish camera, publish screen
+                    await rtc.client.unpublish(rtc.localVideoTrack);
+                    
+                    let tracksToPublish = [rtc.screenVideoTrack];
+                    if (rtc.screenAudioTrack) tracksToPublish.push(rtc.screenAudioTrack);
+                    
+                    await rtc.client.publish(tracksToPublish);
+
+                    // Stop local video preview, show screen preview
+                    rtc.localVideoTrack.stop();
+                    rtc.screenVideoTrack.play("local-video");
+
+                    if(!isCinemaMode) toggleCinemaMode();
+
+                    // Handle user clicking "Stop Sharing" on the browser banner
+                    rtc.screenVideoTrack.on("track-ended", async () => {
+                        await stopScreenShare();
+                    });
+
+                } catch (err) {
+                    console.log("Screenshare aborted:", err);
+                }
+            } else {
+                await stopScreenShare();
+            }
+        }
+
+        async function stopScreenShare() {
+            if (rtc.screenVideoTrack) {
+                let tracksToUnpublish = [rtc.screenVideoTrack];
+                if (rtc.screenAudioTrack) tracksToUnpublish.push(rtc.screenAudioTrack);
+                
+                await rtc.client.unpublish(tracksToUnpublish);
+                
+                rtc.screenVideoTrack.close();
+                if(rtc.screenAudioTrack) rtc.screenAudioTrack.close();
+                
+                rtc.screenVideoTrack = null;
+                rtc.screenAudioTrack = null;
+
+                // Restore Camera
+                await rtc.client.publish(rtc.localVideoTrack);
+                rtc.localVideoTrack.play("local-video");
+            }
+        }
+
+        // --- Chat & Avatar Data ---
         function sendChat(e) {
             e.preventDefault();
             const input = document.getElementById('chat-input');
             const msg = input.value.trim();
             if(!msg) return;
-            showSpeechBubble(myId, msg);
+
+            showSpeechBubble(myIdStr, msg);
             appendLog("You", msg);
-            broadcastData('chat', { msg: msg, peerId: myId, sender: profile.name });
+            if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'chat', msg: msg, sender: profile.name }) });
             input.value = '';
         }
 
@@ -379,14 +425,18 @@
         function showSpeechBubble(peerId, text) {
             const container = document.getElementById(`avatar-inner-${peerId}`);
             if(!container) return;
+
             const old = container.querySelector('.speech-bubble');
             if(old) old.remove();
+
             const bubble = document.createElement('div');
             bubble.className = 'speech-bubble absolute -top-10 left-1/2 transform -translate-x-1/2 bg-white text-black px-3 py-1 rounded-xl font-bold shadow-2xl whitespace-nowrap z-50 text-[10px] transition-all';
             bubble.innerText = text;
+            
             const pointer = document.createElement('div');
             pointer.className = 'absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-white rotate-45';
             bubble.appendChild(pointer);
+
             container.appendChild(bubble);
             setTimeout(() => { if(bubble.parentNode) bubble.remove(); }, 5000);
         }
@@ -396,6 +446,7 @@
             element.onmousedown = dragMouseDown;
             function dragMouseDown(e) {
                 e = e || window.event;
+                if(e.target.tagName === 'INPUT') return;
                 e.preventDefault();
                 startX = e.clientX; startY = e.clientY;
                 document.querySelectorAll('.draggable-avatar').forEach(el => el.style.zIndex = '20');
@@ -417,52 +468,37 @@
         function spawnAvatarUI(id, name, avatarType, isLocal) {
             const space = document.getElementById('avatar-space');
             if(document.getElementById(`avatar-${id}`)) return; 
+
             const outerWrapper = document.createElement('div');
             outerWrapper.id = `avatar-${id}`;
             outerWrapper.className = `draggable-avatar pointer-events-auto`;
+            
             const centerX = window.innerWidth / 2;
             const centerY = window.innerHeight / 2;
             const offsetX = isLocal ? -40 : 40; 
+            
             outerWrapper.style.left = `${(centerX + offsetX) - 30}px`; 
             outerWrapper.style.top = `${centerY - 30}px`;
+
             const innerWrapper = document.createElement('div');
             innerWrapper.id = `avatar-inner-${id}`;
             innerWrapper.className = `flex flex-col items-center animate-float relative`;
+
             const nameTag = document.createElement('div');
             nameTag.className = 'bg-black/80 text-white px-2 py-0.5 rounded-full text-[9px] font-bold mb-1 border border-white/10 shadow-lg pointer-events-none';
             nameTag.innerText = name + (isLocal ? " (You)" : "");
+
             const imgDiv = document.createElement('div');
             imgDiv.id = `ring-${id}`;
             imgDiv.className = 'w-14 h-14 bg-[#111] border border-gray-800 rounded-full flex items-center justify-center text-2xl shadow-xl transition-all duration-200';
             imgDiv.innerText = avatarMap[avatarType] || '👤';
+
             innerWrapper.appendChild(nameTag);
             innerWrapper.appendChild(imgDiv);
             outerWrapper.appendChild(innerWrapper);
             space.appendChild(outerWrapper);
-            makeDraggable(outerWrapper);
-        }
 
-        function monitorVoiceActivity(stream, id) {
-            try {
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const analyzer = audioCtx.createAnalyser();
-                const source = audioCtx.createMediaStreamSource(stream);
-                source.connect(analyzer);
-                analyzer.fftSize = 256;
-                const bufferLength = analyzer.frequencyBinCount;
-                const dataArray = new Uint8Array(bufferLength);
-                setInterval(() => {
-                    analyzer.getByteFrequencyData(dataArray);
-                    let sum = 0;
-                    for(let i=0; i<bufferLength; i++) sum += dataArray[i];
-                    let average = sum / bufferLength;
-                    const ring = document.getElementById(`ring-${id}`);
-                    if(ring) {
-                        if(average > 15) ring.classList.add('speaking');
-                        else ring.classList.remove('speaking');
-                    }
-                }, 100);
-            } catch(e) { console.log("VAD not supported", e); }
+            makeDraggable(outerWrapper);
         }
     </script>
 </body>
