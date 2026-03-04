@@ -3,26 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vibe Space - Cinema Edition</title>
+    <title>Vibe Space - Diagnostics</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js" 
-            onerror="document.getElementById('room-status').innerText = 'ERROR: NETWORK BLOCKED THE LIBRARY! Turn on VPN.'; document.getElementById('room-status').classList.replace('text-blue-500', 'text-red-500');">
-    </script>
-
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    fontFamily: { 'cute': ['Nunito', 'sans-serif'], 'pixel': ['"Press Start 2P"', 'cursive'] }
-                }
-            }
-        }
+        tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: { 'cute': ['Nunito', 'sans-serif'], 'pixel': ['"Press Start 2P"', 'cursive'] } } } }
     </script>
-
     <style>
         body { overflow: hidden; background-color: #000000; color: white; }
         .glass { background: rgba(10, 10, 10, 0.7); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); }
@@ -42,18 +30,13 @@
         <div class="glass p-10 rounded-3xl w-full max-w-md text-center flex flex-col items-center border border-white/5">
             <h1 class="text-3xl font-black text-white mb-2 tracking-tight">Vibe Space</h1>
             <p id="room-status" class="text-blue-500 font-bold mb-8 text-xs uppercase tracking-widest">INITIALIZING NETWORK...</p>
-            
             <input type="text" id="username" placeholder="Collins" class="w-full px-6 py-4 rounded-2xl bg-[#0a0a0a] text-white border border-gray-800 focus:border-blue-500 outline-none text-lg mb-8 shadow-inner font-bold placeholder-gray-600">
-            
             <div class="flex gap-4 mb-10">
                 <button onclick="selectAvatar('duck')" id="btn-duck" class="avatar-btn w-16 h-16 rounded-2xl bg-[#111] border-2 border-transparent hover:border-blue-500 flex items-center justify-center text-3xl transition-all shadow-lg">🦆</button>
                 <button onclick="selectAvatar('knight')" id="btn-knight" class="avatar-btn w-16 h-16 rounded-2xl bg-[#111] border-2 border-transparent hover:border-blue-500 flex items-center justify-center text-3xl transition-all shadow-lg">♘</button>
                 <button onclick="selectAvatar('alien')" id="btn-alien" class="avatar-btn w-16 h-16 rounded-2xl bg-[#111] border-2 border-transparent hover:border-blue-500 flex items-center justify-center text-3xl transition-all shadow-lg">👾</button>
             </div>
-
-            <button onclick="enterSpace()" id="join-btn" disabled class="w-full bg-white text-black hover:bg-gray-200 disabled:bg-gray-800 disabled:text-gray-500 font-black text-lg py-4 rounded-2xl transition-all shadow-xl">
-                Enter Space
-            </button>
+            <button onclick="enterSpace()" id="join-btn" disabled class="w-full bg-white text-black hover:bg-gray-200 disabled:bg-gray-800 disabled:text-gray-500 font-black text-lg py-4 rounded-2xl transition-all shadow-xl">Enter Space</button>
         </div>
     </div>
 
@@ -64,38 +47,27 @@
             <div class="flex flex-col gap-3 pointer-events-auto">
                 <div class="glass flex items-center gap-3 px-4 py-3 rounded-2xl">
                     <div class="text-lg animate-pulse">📻</div>
-                    <div class="w-32 overflow-hidden font-pixel text-[8px] text-gray-300">
-                        <marquee scrollamount="3">Now Playing: Dave - Starlight 🎵</marquee>
-                    </div>
+                    <div class="w-32 overflow-hidden font-pixel text-[8px] text-gray-300"><marquee scrollamount="3">Now Playing: Dave - Starlight 🎵</marquee></div>
                 </div>
-                <button onclick="copyRoomLink()" class="glass px-4 py-2 rounded-xl text-xs font-bold text-gray-300 hover:text-white transition-colors flex items-center gap-2">
-                    <span class="material-icons text-sm">link</span> Copy Invite Link
-                </button>
+                <button onclick="copyRoomLink()" class="glass px-4 py-2 rounded-xl text-xs font-bold text-gray-300 hover:text-white transition-colors flex items-center gap-2"><span class="material-icons text-sm">link</span> Copy Invite Link</button>
             </div>
-
             <div class="flex flex-col items-end gap-3 pointer-events-auto">
-                <button onclick="toggleLowData()" id="data-btn" class="glass px-3 py-2 rounded-xl font-bold text-green-500 hover:bg-white/5 transition-all flex items-center gap-2 text-[10px] uppercase tracking-wider">
-                    <span class="material-icons text-sm">network_check</span> <span id="data-text">Stable</span>
-                </button>
+                <button onclick="toggleLowData()" id="data-btn" class="glass px-3 py-2 rounded-xl font-bold text-green-500 hover:bg-white/5 transition-all flex items-center gap-2 text-[10px] uppercase tracking-wider"><span class="material-icons text-sm">network_check</span> <span id="data-text">Stable</span></button>
                 <video id="local-video" class="w-32 h-24 object-cover rounded-xl border border-gray-800 bg-[#0a0a0a] shadow-xl" autoplay muted playsinline></video>
             </div>
         </header>
 
-        <button onclick="toggleCinemaMode()" id="cinema-exit-btn" class="hidden absolute top-6 right-6 z-[70] glass px-4 py-2 rounded-xl font-bold text-white hover:bg-white/10 transition-all flex items-center gap-2 text-xs shadow-2xl">
-            <span class="material-icons text-sm">close_fullscreen</span> Exit Cinema Mode
-        </button>
+        <button onclick="toggleCinemaMode()" id="cinema-exit-btn" class="hidden absolute top-6 right-6 z-[70] glass px-4 py-2 rounded-xl font-bold text-white hover:bg-white/10 transition-all flex items-center gap-2 text-xs shadow-2xl"><span class="material-icons text-sm">close_fullscreen</span> Exit Cinema Mode</button>
 
         <div id="avatar-space" class="absolute inset-0 z-20 pointer-events-none"></div>
 
         <div id="bottom-ui" class="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-3 z-[60] w-full max-w-xl px-6 pointer-events-none">
-            <div id="chat-log" class="w-full h-20 overflow-y-auto text-[11px] font-bold flex flex-col gap-1 pointer-events-auto mask-image: linear-gradient(to top, black 80%, transparent); text-shadow: 0 1px 2px rgba(0,0,0,0.8);"></div>
+            <div id="chat-log" class="w-full h-24 overflow-y-auto text-[11px] font-bold flex flex-col gap-1 pointer-events-auto mask-image: linear-gradient(to top, black 80%, transparent); text-shadow: 0 1px 2px rgba(0,0,0,0.8);"></div>
 
             <div class="flex gap-2 w-full pointer-events-auto items-center">
                 <form onsubmit="sendChat(event)" class="flex-1 relative transition-all duration-300">
                     <input type="text" id="chat-input" placeholder="Type a thought..." class="w-full glass py-3 px-5 rounded-2xl text-white placeholder-gray-500 outline-none font-bold focus:border-white/30 transition-all text-sm shadow-xl focus:opacity-100 hover:opacity-100">
-                    <button type="submit" class="absolute right-1 top-1 hover:bg-white/10 text-white p-2 rounded-xl transition-all">
-                        <span class="material-icons text-sm">send</span>
-                    </button>
+                    <button type="submit" class="absolute right-1 top-1 hover:bg-white/10 text-white p-2 rounded-xl transition-all"><span class="material-icons text-sm">send</span></button>
                 </form>
 
                 <div id="media-dock" class="glass px-5 py-2 rounded-2xl flex items-center gap-4 shadow-xl transition-all duration-300 origin-right">
@@ -139,31 +111,16 @@
                 return;
             }
 
-            statusEl.innerText = "Contacting Server & Relays...";
-
             try {
-                // ADDED FREE TURN SERVERS TO BYPASS STRICT NIGERIAN NETWORKS
                 peer = new Peer({ 
                     debug: 2,
                     config: {
                         'iceServers': [
                             { urls: 'stun:stun.l.google.com:19302' },
                             { urls: 'stun:stun1.l.google.com:19302' },
-                            {
-                                urls: "turn:openrelay.metered.ca:80",
-                                username: "openrelayproject",
-                                credential: "openrelayproject"
-                            },
-                            {
-                                urls: "turn:openrelay.metered.ca:443",
-                                username: "openrelayproject",
-                                credential: "openrelayproject"
-                            },
-                            {
-                                urls: "turn:openrelay.metered.ca:443?transport=tcp",
-                                username: "openrelayproject",
-                                credential: "openrelayproject"
-                            }
+                            { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+                            { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+                            { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
                         ]
                     }
                 }); 
@@ -177,31 +134,18 @@
 
                 peer.on('error', (err) => {
                     console.error("PeerJS Error:", err);
-                    if (err.type === 'peer-unavailable') {
-                        // If they missed the host, retry silently
-                        console.log("Host not found immediately, retrying connection...");
-                    } else {
-                        statusEl.innerText = "ERROR: " + err.type;
-                        statusEl.classList.replace('text-blue-500', 'text-red-500');
-                    }
+                    appendLog("System Error", err.type);
                 });
 
                 peer.on('connection', (conn) => setupDataConnection(conn));
                 peer.on('call', (call) => {
+                    appendLog("System", "Incoming call from friend!");
                     call.answer(localStream); 
                     handleCallStream(call);
                 });
 
-                setTimeout(() => {
-                    if (!myId) {
-                        statusEl.innerText = "BLOCKED BY NETWORK/ISP! Try a VPN.";
-                        statusEl.classList.replace('text-blue-500', 'text-red-500');
-                    }
-                }, 8000);
-
             } catch (error) {
                 statusEl.innerText = "CRASH: " + error.message;
-                statusEl.classList.replace('text-blue-500', 'text-red-500');
             }
         };
 
@@ -231,70 +175,54 @@
                 document.getElementById('local-video').srcObject = localStream;
                 monitorVoiceActivity(localStream, myId);
             } catch (err) {
-                console.error("Media Error:", err);
+                appendLog("System", "Camera/Mic not found or blocked.");
                 localStream = new MediaStream();
             }
 
-            // JOINING LOGIC WITH RETRIES
             if (roomToJoin && roomToJoin !== myId) {
-                let attempts = 0;
+                appendLog("System", "Attempting to contact host signaling server...");
                 
-                function attemptConnection() {
-                    appendLog("System", `Connecting to host... (Attempt ${attempts + 1})`);
-                    const conn = peer.connect(roomToJoin, { metadata: profile, reliable: true });
+                // Removed reliable: true as it causes hangs on strict NATs
+                const conn = peer.connect(roomToJoin, { metadata: profile });
+                
+                conn.on('open', () => {
+                    appendLog("System", "Signaling connected! Handshaking data...");
+                    setupDataConnection(conn);
                     
-                    conn.on('open', () => {
-                        appendLog("System", "Data channel connected!");
-                        setupDataConnection(conn);
-                        
-                        // Only try the media call after data channel succeeds
-                        setTimeout(() => {
-                            const call = peer.call(roomToJoin, localStream);
-                            handleCallStream(call);
-                        }, 500);
-                    });
+                    setTimeout(() => {
+                        appendLog("System", "Initiating media call...");
+                        const call = peer.call(roomToJoin, localStream);
+                        handleCallStream(call);
+                    }, 500);
+                });
 
-                    conn.on('error', () => {
-                        attempts++;
-                        if (attempts < 3) {
-                            setTimeout(attemptConnection, 2000); // Retry after 2 seconds
-                        } else {
-                            appendLog("System", "Failed to connect to host. They might have left the room.");
-                        }
-                    });
-                }
-                
-                attemptConnection();
+                conn.on('error', (err) => {
+                    appendLog("System", "Data connection failed: " + err);
+                });
             }
         }
 
         function copyRoomLink() {
             let path = window.location.pathname;
-            if (!path.endsWith('/')) {
-                path += '/';
-            }
+            if (!path.endsWith('/')) { path += '/'; }
             const link = `${window.location.origin}${path}?room=${myId}`;
             navigator.clipboard.writeText(link);
-            alert("Invite link copied! Send it over.");
+            alert("Invite link copied!");
         }
 
         function setupDataConnection(conn) {
-            if (!connections.includes(conn)) {
-                connections.push(conn);
-            }
+            if (!connections.includes(conn)) connections.push(conn);
             
-            // Send profile immediately if open, otherwise wait for open event
             if (conn.open) {
                 conn.send({ type: 'profile', data: profile, peerId: myId });
             } else {
-                conn.on('open', () => {
-                    conn.send({ type: 'profile', data: profile, peerId: myId });
-                });
+                conn.on('open', () => conn.send({ type: 'profile', data: profile, peerId: myId }));
             }
 
             conn.on('data', (payload) => {
                 if (payload.type === 'profile') {
                     spawnAvatarUI(payload.peerId, payload.data.name, payload.data.avatar, false);
+                    appendLog("System", `${payload.data.name} fully connected!`);
                 } 
                 else if (payload.type === 'chat') {
                     showSpeechBubble(payload.peerId, payload.msg);
@@ -304,14 +232,15 @@
             conn.on('close', () => {
                 const el = document.getElementById(`avatar-${conn.peer}`);
                 if(el) el.remove();
+                appendLog("System", "Friend disconnected.");
             });
         }
 
         function handleCallStream(call) {
-            if (!mediaCalls.includes(call)) {
-                mediaCalls.push(call);
-            }
+            if (!mediaCalls.includes(call)) mediaCalls.push(call);
+            
             call.on('stream', (remoteStream) => {
+                appendLog("System", "Media stream received successfully!");
                 let vidEl = document.getElementById(`vid-${call.peer}`);
                 if (!vidEl) {
                     vidEl = document.createElement('video');
@@ -324,6 +253,7 @@
                 vidEl.srcObject = remoteStream;
                 monitorVoiceActivity(remoteStream, call.peer);
             });
+            call.on('error', (err) => appendLog("System", "Call error: " + err));
             call.on('close', () => {
                 const vidEl = document.getElementById(`vid-${call.peer}`);
                 if(vidEl) vidEl.remove();
@@ -344,25 +274,14 @@
             if (isCinemaMode) {
                 header.classList.add('opacity-0', 'pointer-events-none');
                 mediaDock.classList.add('opacity-0', 'pointer-events-none', 'scale-95');
-                
-                setTimeout(() => {
-                    header.classList.add('hidden');
-                    mediaDock.classList.add('hidden');
-                    exitBtn.classList.remove('hidden');
-                }, 300);
-
+                setTimeout(() => { header.classList.add('hidden'); mediaDock.classList.add('hidden'); exitBtn.classList.remove('hidden'); }, 300);
                 chatInput.classList.remove('glass');
                 chatInput.classList.add('bg-black/40', 'backdrop-blur-sm', 'border', 'border-white/10', 'opacity-50');
             } else {
                 header.classList.remove('hidden');
                 mediaDock.classList.remove('hidden');
                 exitBtn.classList.add('hidden');
-                
-                setTimeout(() => {
-                    header.classList.remove('opacity-0', 'pointer-events-none');
-                    mediaDock.classList.remove('opacity-0', 'pointer-events-none', 'scale-95');
-                }, 10);
-
+                setTimeout(() => { header.classList.remove('opacity-0', 'pointer-events-none'); mediaDock.classList.remove('opacity-0', 'pointer-events-none', 'scale-95'); }, 10);
                 chatInput.classList.remove('bg-black/40', 'backdrop-blur-sm', 'border', 'border-white/10', 'opacity-50');
                 chatInput.classList.add('glass');
             }
@@ -383,11 +302,7 @@
 
         async function startScreenShare() {
             try {
-                screenStream = await navigator.mediaDevices.getDisplayMedia({ 
-                    video: { width: { ideal: 1920 }, frameRate: { ideal: 30 } },
-                    audio: true 
-                });
-                
+                screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: 1920 }, frameRate: { ideal: 30 } }, audio: true });
                 const screenVideoTrack = screenStream.getVideoTracks()[0];
                 const screenAudioTrack = screenStream.getAudioTracks()[0]; 
 
@@ -405,7 +320,6 @@
                 mediaCalls.forEach(call => {
                     const videoSender = call.peerConnection.getSenders().find(s => s.track.kind === 'video');
                     if(videoSender && screenVideoTrack) videoSender.replaceTrack(screenVideoTrack);
-                    
                     if (screenAudioTrack) {
                         const audioSender = call.peerConnection.getSenders().find(s => s.track.kind === 'audio');
                         if(audioSender) audioSender.replaceTrack(screenAudioTrack);
@@ -416,28 +330,22 @@
 
                 screenVideoTrack.onended = () => {
                     if(myBigScreen) myBigScreen.remove();
-                    
                     const camVideoTrack = localStream.getVideoTracks()[0];
                     const camAudioTrack = localStream.getAudioTracks()[0];
-                    
                     mediaCalls.forEach(call => {
                         const videoSender = call.peerConnection.getSenders().find(s => s.track.kind === 'video');
                         if(videoSender && camVideoTrack) videoSender.replaceTrack(camVideoTrack);
-                        
                         const audioSender = call.peerConnection.getSenders().find(s => s.track.kind === 'audio');
                         if(audioSender && camAudioTrack) audioSender.replaceTrack(camAudioTrack);
                     });
                 };
-            } catch (err) {
-                console.log("Screenshare aborted or failed:", err);
-            }
+            } catch (err) { console.log("Screenshare aborted:", err); }
         }
 
         function toggleLowData() {
             isLowData = !isLowData;
             const btn = document.getElementById('data-btn');
             const text = document.getElementById('data-text');
-            
             if (isLowData) {
                 btn.classList.replace('text-green-500', 'text-red-500');
                 text.innerText = "Low Data";
@@ -454,7 +362,6 @@
             const input = document.getElementById('chat-input');
             const msg = input.value.trim();
             if(!msg) return;
-
             showSpeechBubble(myId, msg);
             appendLog("You", msg);
             broadcastData('chat', { msg: msg, peerId: myId, sender: profile.name });
@@ -472,18 +379,14 @@
         function showSpeechBubble(peerId, text) {
             const container = document.getElementById(`avatar-inner-${peerId}`);
             if(!container) return;
-
             const old = container.querySelector('.speech-bubble');
             if(old) old.remove();
-
             const bubble = document.createElement('div');
             bubble.className = 'speech-bubble absolute -top-10 left-1/2 transform -translate-x-1/2 bg-white text-black px-3 py-1 rounded-xl font-bold shadow-2xl whitespace-nowrap z-50 text-[10px] transition-all';
             bubble.innerText = text;
-            
             const pointer = document.createElement('div');
             pointer.className = 'absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-white rotate-45';
             bubble.appendChild(pointer);
-
             container.appendChild(bubble);
             setTimeout(() => { if(bubble.parentNode) bubble.remove(); }, 5000);
         }
@@ -494,8 +397,7 @@
             function dragMouseDown(e) {
                 e = e || window.event;
                 e.preventDefault();
-                startX = e.clientX;
-                startY = e.clientY;
+                startX = e.clientX; startY = e.clientY;
                 document.querySelectorAll('.draggable-avatar').forEach(el => el.style.zIndex = '20');
                 element.style.zIndex = '50';
                 document.onmouseup = closeDragElement;
@@ -504,52 +406,39 @@
             function elementDrag(e) {
                 e = e || window.event;
                 e.preventDefault();
-                let dx = startX - e.clientX;
-                let dy = startY - e.clientY;
-                startX = e.clientX;
-                startY = e.clientY;
+                let dx = startX - e.clientX; let dy = startY - e.clientY;
+                startX = e.clientX; startY = e.clientY;
                 element.style.top = (element.offsetTop - dy) + "px";
                 element.style.left = (element.offsetLeft - dx) + "px";
             }
-            function closeDragElement() {
-                document.onmouseup = null;
-                document.onmousemove = null;
-            }
+            function closeDragElement() { document.onmouseup = null; document.onmousemove = null; }
         }
 
         function spawnAvatarUI(id, name, avatarType, isLocal) {
             const space = document.getElementById('avatar-space');
             if(document.getElementById(`avatar-${id}`)) return; 
-
             const outerWrapper = document.createElement('div');
             outerWrapper.id = `avatar-${id}`;
             outerWrapper.className = `draggable-avatar pointer-events-auto`;
-            
             const centerX = window.innerWidth / 2;
             const centerY = window.innerHeight / 2;
             const offsetX = isLocal ? -40 : 40; 
-            
             outerWrapper.style.left = `${(centerX + offsetX) - 30}px`; 
             outerWrapper.style.top = `${centerY - 30}px`;
-
             const innerWrapper = document.createElement('div');
             innerWrapper.id = `avatar-inner-${id}`;
             innerWrapper.className = `flex flex-col items-center animate-float relative`;
-
             const nameTag = document.createElement('div');
             nameTag.className = 'bg-black/80 text-white px-2 py-0.5 rounded-full text-[9px] font-bold mb-1 border border-white/10 shadow-lg pointer-events-none';
             nameTag.innerText = name + (isLocal ? " (You)" : "");
-
             const imgDiv = document.createElement('div');
             imgDiv.id = `ring-${id}`;
             imgDiv.className = 'w-14 h-14 bg-[#111] border border-gray-800 rounded-full flex items-center justify-center text-2xl shadow-xl transition-all duration-200';
             imgDiv.innerText = avatarMap[avatarType] || '👤';
-
             innerWrapper.appendChild(nameTag);
             innerWrapper.appendChild(imgDiv);
             outerWrapper.appendChild(innerWrapper);
             space.appendChild(outerWrapper);
-
             makeDraggable(outerWrapper);
         }
 
@@ -562,13 +451,11 @@
                 analyzer.fftSize = 256;
                 const bufferLength = analyzer.frequencyBinCount;
                 const dataArray = new Uint8Array(bufferLength);
-
                 setInterval(() => {
                     analyzer.getByteFrequencyData(dataArray);
                     let sum = 0;
                     for(let i=0; i<bufferLength; i++) sum += dataArray[i];
                     let average = sum / bufferLength;
-
                     const ring = document.getElementById(`ring-${id}`);
                     if(ring) {
                         if(average > 15) ring.classList.add('speaking');
