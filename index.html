@@ -140,19 +140,49 @@
         const roomToJoin = urlParams.get('room');
 
 function initNetwork() {
-            // We are upgrading the Peer connection with Google's free STUN servers
-            peer = new Peer({ 
+            // 1. Generate our own ID instantly so we don't wait for the server
+            const myRandomId = 'vibe_' + Math.random().toString(36).substr(2, 9);
+            
+            // 2. Force a secure connection and add Google STUN servers
+            peer = new Peer(myRandomId, { 
                 debug: 2,
+                secure: true, 
                 config: {
                     'iceServers': [
                         { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun2.l.google.com:19302' },
-                        { urls: 'stun:stun3.l.google.com:19302' },
-                        { urls: 'stun:stun4.l.google.com:19302' }
+                        { urls: 'stun:stun1.l.google.com:19302' }
                     ]
                 }
             }); 
+            
+            // 3. Success Handler
+            peer.on('open', (id) => {
+                myId = id;
+                const statusEl = document.getElementById('room-status');
+                statusEl.innerText = "Network Ready";
+                statusEl.classList.replace('text-blue-500', 'text-green-500');
+                document.getElementById('join-btn').disabled = false;
+            });
+
+            // 4. ERROR HANDLER (So it never gets stuck silently again!)
+            peer.on('error', (err) => {
+                console.error("Network Error:", err);
+                const statusEl = document.getElementById('room-status');
+                statusEl.innerText = "Connection Failed. Retrying...";
+                statusEl.classList.replace('text-blue-500', 'text-red-500');
+                
+                // Try to force a reconnect if the network drops
+                setTimeout(() => {
+                    if(peer.disconnected) peer.reconnect();
+                }, 3000);
+            });
+
+            peer.on('connection', (conn) => setupDataConnection(conn));
+            peer.on('call', (call) => {
+                call.answer(localStream); 
+                handleCallStream(call);
+            });
+        }
             
             peer.on('open', (id) => {
                 myId = id;
