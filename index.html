@@ -8,8 +8,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     
-    <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.1.js"></script>
-    <script src="https://download.agora.io/sdk/release/agora-rtm-sdk-1.5.1.js"></script>
+    <script src="https://unpkg.com/agora-rtc-sdk-ng"></script>
+    <script src="https://unpkg.com/agora-rtm-sdk@1.5.1"></script>
 
     <script>
         tailwind.config = {
@@ -34,7 +34,6 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
         
-        /* Agora injects videos inside divs, so we make sure they fit */
         #local-video video { object-fit: cover !important; border-radius: 0.75rem; }
     </style>
 </head>
@@ -43,7 +42,7 @@
     <div id="login-screen" class="absolute inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-xl transition-opacity duration-500">
         <div class="glass p-10 rounded-3xl w-full max-w-md text-center flex flex-col items-center border border-white/5">
             <h1 class="text-3xl font-black text-white mb-2 tracking-tight">Vibe Space</h1>
-            <p id="room-status" class="text-green-500 font-bold mb-8 text-xs uppercase tracking-widest">AGORA ENGINE READY</p>
+            <p id="room-status" class="text-blue-500 font-bold mb-8 text-xs uppercase tracking-widest">INITIALIZING ENGINE...</p>
             
             <input type="text" id="username" placeholder="Collins" class="w-full px-6 py-4 rounded-2xl bg-[#0a0a0a] text-white border border-gray-800 focus:border-blue-500 outline-none text-lg mb-8 shadow-inner font-bold placeholder-gray-600">
             
@@ -53,14 +52,13 @@
                 <button onclick="selectAvatar('alien')" id="btn-alien" class="avatar-btn w-16 h-16 rounded-2xl bg-[#111] border-2 border-transparent hover:border-blue-500 flex items-center justify-center text-3xl transition-all shadow-lg">👾</button>
             </div>
 
-            <button onclick="enterSpace()" id="join-btn" class="w-full bg-white text-black hover:bg-gray-200 font-black text-lg py-4 rounded-2xl transition-all shadow-xl">
+            <button onclick="enterSpace()" id="join-btn" disabled class="w-full bg-white text-black hover:bg-gray-200 disabled:bg-gray-800 disabled:text-gray-500 font-black text-lg py-4 rounded-2xl transition-all shadow-xl">
                 Enter Space
             </button>
         </div>
     </div>
 
     <div id="main-app" class="hidden w-full h-full relative">
-        
         <div id="video-layer" class="absolute inset-0 z-0 bg-black flex items-center justify-center"></div>
 
         <header id="header-ui" class="absolute top-6 left-6 right-6 flex justify-between items-start z-[60] transition-opacity duration-300 pointer-events-none">
@@ -91,7 +89,6 @@
         <div id="avatar-space" class="absolute inset-0 z-20 pointer-events-none"></div>
 
         <div id="bottom-ui" class="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-3 z-[60] w-full max-w-xl px-6 pointer-events-none">
-            
             <div id="chat-log" class="w-full h-20 overflow-y-auto text-[11px] font-bold flex flex-col gap-1 pointer-events-auto mask-image: linear-gradient(to top, black 80%, transparent); text-shadow: 0 1px 2px rgba(0,0,0,0.8);"></div>
 
             <div class="flex gap-2 w-full pointer-events-auto items-center">
@@ -116,11 +113,7 @@
     </div>
 
     <script>
-        // ==========================================
-        // PUT YOUR AGORA APP ID HERE ↓↓↓
-        // ==========================================
-        const AGORA_APP_ID = "YOUR_APP_ID_HERE"; 
-        // ==========================================
+        const AGORA_APP_ID = "1200bba1607549c78691da498a9b4d2c"; 
 
         const rtc = {
             client: null,
@@ -135,7 +128,6 @@
             channel: null
         };
 
-        // Agora strictly uses numbers for RTC UIDs, and strings for RTM.
         const myIdNum = Math.floor(Math.random() * 1000000);
         const myIdStr = myIdNum.toString(); 
 
@@ -147,11 +139,26 @@
 
         const avatarMap = { 'duck': '🦆', 'knight': '♘', 'alien': '👾' };
         
-        // Channel Logic (No redirects!)
         let roomName = new URLSearchParams(window.location.search).get('room');
         if(!roomName) {
             roomName = 'vibe_' + Math.random().toString(36).substr(2, 6);
         }
+
+        // Wait for page and libraries to load
+        window.onload = () => {
+            const statusEl = document.getElementById('room-status');
+            const joinBtn = document.getElementById('join-btn');
+
+            if (typeof AgoraRTC === 'undefined' || typeof AgoraRTM === 'undefined') {
+                statusEl.innerText = "ERROR: NETWORK BLOCKED AGORA! Turn on VPN.";
+                statusEl.classList.replace('text-blue-500', 'text-red-500');
+                return;
+            }
+
+            statusEl.innerText = "AGORA ENGINE READY";
+            statusEl.classList.replace('text-blue-500', 'text-green-500');
+            joinBtn.disabled = false;
+        };
 
         function selectAvatar(type) {
             profile.avatar = type;
@@ -160,11 +167,6 @@
         }
 
         async function enterSpace() {
-            if (AGORA_APP_ID === "YOUR_APP_ID_HERE") {
-                alert("Omo! You forgot to paste your Agora App ID into the code! 😭");
-                return;
-            }
-
             const inputName = document.getElementById('username').value.trim();
             if(inputName) profile.name = inputName;
             if(!profile.avatar) return alert("Select an avatar!");
@@ -177,10 +179,9 @@
             }, 500);
 
             try {
-                // 1. Initialize Agora RTC (Audio/Video)
+                // 1. Initialize Agora RTC
                 rtc.client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
                 
-                // Agora handles VAD internally! It's much cleaner.
                 rtc.client.enableAudioVolumeIndicator();
                 rtc.client.on("volume-indicator", volumes => {
                     volumes.forEach((volume) => {
@@ -192,7 +193,6 @@
                     });
                 });
 
-                // Listen for friends publishing video/audio
                 rtc.client.on("user-published", async (user, mediaType) => {
                     await rtc.client.subscribe(user, mediaType);
                     
@@ -202,10 +202,9 @@
                         if (!player) {
                             player = document.createElement("div");
                             player.id = `remote-player-${user.uid}`;
-                            player.className = "w-full h-full absolute inset-0";
+                            player.className = "w-full h-full absolute inset-0 z-0";
                             document.getElementById("video-layer").appendChild(player);
                         }
-                        // Play remote video into the background layer
                         remoteVideoTrack.play(player.id, { fit: "contain" });
                     }
                     
@@ -227,7 +226,7 @@
                     appendLog("System", "Someone disconnected.");
                 });
 
-                // 2. Initialize Agora RTM (Chat & Data)
+                // 2. Initialize Agora RTM (Chat)
                 rtm.client = AgoraRTM.createInstance(AGORA_APP_ID);
                 await rtm.client.login({ uid: myIdStr });
                 
@@ -242,7 +241,6 @@
                         showSpeechBubble(senderId, data.msg);
                         appendLog(data.sender, data.msg);
                     } else if(data.type === 'request_profiles') {
-                        // Someone new joined, tell them our profile
                         rtm.channel.sendMessage({ text: JSON.stringify({ type: 'profile', data: profile }) });
                     }
                 });
@@ -253,18 +251,14 @@
                 // 4. Create Local Tracks
                 rtc.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
                 rtc.localVideoTrack = await AgoraRTC.createCameraVideoTrack({
-                    encoderConfig: "360p_1" // Optimized for standard web
+                    encoderConfig: "360p_1" 
                 });
 
-                // Play local video in the PiP container
                 rtc.localVideoTrack.play("local-video");
-                
-                // Publish local tracks to the room
                 await rtc.client.publish([rtc.localAudioTrack, rtc.localVideoTrack]);
 
-                // 5. Broadcast our profile to anyone already in the room
+                // 5. Broadcast Profile
                 rtm.channel.sendMessage({ text: JSON.stringify({ type: 'profile', data: profile }) });
-                // Ask anyone already there to send us theirs
                 rtm.channel.sendMessage({ text: JSON.stringify({ type: 'request_profiles' }) });
 
                 appendLog("System", "Connected via Agora Premium Network.");
@@ -282,8 +276,6 @@
             navigator.clipboard.writeText(link);
             alert("Invite link copied! Send it over.");
         }
-
-        // --- Controls & UI ---
 
         function toggleCinemaMode() {
             isCinemaMode = !isCinemaMode;
@@ -329,7 +321,6 @@
             if (isLowData) {
                 btn.classList.replace('text-green-500', 'text-red-500');
                 text.innerText = "Low Data";
-                // Completely halt sending video packets
                 if(rtc.localVideoTrack) rtc.localVideoTrack.setEnabled(false);
             } else {
                 btn.classList.replace('text-red-500', 'text-green-500');
@@ -338,15 +329,13 @@
             }
         }
 
-        // --- Agora Screen Share Engine ---
         async function startScreenShare() {
             if (!rtc.screenVideoTrack) {
                 try {
-                    // Create screen track (asks user for permission)
                     const screenTracks = await AgoraRTC.createScreenVideoTrack({
                         encoderConfig: "1080p_1",
                         optimizationMode: "detail"
-                    }, "auto"); // "auto" requests audio as well
+                    }, "auto"); 
 
                     if (Array.isArray(screenTracks)) {
                         rtc.screenVideoTrack = screenTracks[0];
@@ -355,7 +344,6 @@
                         rtc.screenVideoTrack = screenTracks;
                     }
 
-                    // Unpublish camera, publish screen
                     await rtc.client.unpublish(rtc.localVideoTrack);
                     
                     let tracksToPublish = [rtc.screenVideoTrack];
@@ -363,13 +351,11 @@
                     
                     await rtc.client.publish(tracksToPublish);
 
-                    // Stop local video preview, show screen preview
                     rtc.localVideoTrack.stop();
                     rtc.screenVideoTrack.play("local-video");
 
                     if(!isCinemaMode) toggleCinemaMode();
 
-                    // Handle user clicking "Stop Sharing" on the browser banner
                     rtc.screenVideoTrack.on("track-ended", async () => {
                         await stopScreenShare();
                     });
@@ -395,13 +381,11 @@
                 rtc.screenVideoTrack = null;
                 rtc.screenAudioTrack = null;
 
-                // Restore Camera
                 await rtc.client.publish(rtc.localVideoTrack);
                 rtc.localVideoTrack.play("local-video");
             }
         }
 
-        // --- Chat & Avatar Data ---
         function sendChat(e) {
             e.preventDefault();
             const input = document.getElementById('chat-input');
