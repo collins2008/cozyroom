@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CozyRoom</title>
+    <title>Vibe Space - Cinema Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
@@ -140,11 +140,7 @@
     </div>
 
     <script>
-        // ==========================================
-        // PASTE YOUR NEW "COZYROOM" APP ID HERE ↓↓↓
-        // ==========================================
         const AGORA_APP_ID = "1200bba1607549c78691da498a9b4d2c"; 
-        // ==========================================
 
         const rtc = { client: null, localAudioTrack: null, localVideoTrack: null };
         const rtm = { client: null, channel: null };
@@ -204,7 +200,7 @@
                 }
             });
 
-            // UPGRADE: THE DESYNC HEARTBEAT (Checks every 4 seconds)
+            // UPGRADE: THE DESYNC HEARTBEAT
             setInterval(() => {
                 if (!vid.paused && !isBuffering && rtm.channel) {
                     rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'heartbeat_check', time: vid.currentTime }) });
@@ -227,9 +223,8 @@
             const vid = document.getElementById('cinema-player');
             let finalStreamUrl = url;
 
-            // UPGRADE: Smart Converter handles Dropbox and Google Drive links automatically
+            // UPGRADE: Smart Converter handles links automatically
             if (url.includes('dropbox.com')) {
-                // Strip out ?dl=0 and force &raw=1
                 finalStreamUrl = url.split('?')[0] + '?raw=1';
                 console.log("Auto-converted Dropbox link!");
             } else if (url.includes('drive.google.com/file/d/')) {
@@ -245,6 +240,7 @@
             vid.play().catch(e => console.log("Autoplay waiting for user interaction..."));
         }
 
+        // --- BACK TO YOUR ORIGINAL WORKING ONLOAD ---
         window.onload = () => {
             const statusEl = document.getElementById('room-status');
             const joinBtn = document.getElementById('join-btn');
@@ -366,7 +362,7 @@
                         const vid = document.getElementById('cinema-player');
                         isRemoteControl = true; 
                         
-                        // UPGRADE: Full Remote Buffer & Heartbeat Logic
+                        // UPGRADE: Full Remote Buffer Logic integration
                         const timeDifference = Math.abs(vid.currentTime - data.time);
 
                         if (data.action === 'pause_for_buffer') {
@@ -397,7 +393,7 @@
 
                 await rtc.client.join(AGORA_APP_ID, roomName, null, myIdNum);
 
-                // UPGRADE: Audio Engine Fix (AEC/ANS On, AGC Off) + Bandwidth Saver (240p)
+                // UPGRADE: Audio Engine Fix & Video Bandwidth Saver
                 rtc.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
                     encoderConfig: "high_quality",
                     AEC: true,  
@@ -431,6 +427,7 @@
 
         // UI Controls & Helpers
         function copyRoomLink() {
+            // UPGRADE: Clean Link Generator
             const link = `${window.location.origin}${window.location.pathname}?room=${roomName}`;
             navigator.clipboard.writeText(link);
             alert("Invite link copied! Send it over.");
