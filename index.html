@@ -370,6 +370,7 @@
                         isRemoteControl = true; 
                         
                         // UPGRADE: Full Remote Buffer Logic integration
+                        // UPGRADE: Hyper-Strict Desync tolerance
                         const timeDifference = Math.abs(vid.currentTime - data.time);
 
                         if (data.action === 'pause_for_buffer') {
@@ -380,13 +381,24 @@
                             vid.play().catch(e=>console.log(e));
                             console.log("Partner caught up. Playing...");
                         }
+                        
                         if (data.action === 'heartbeat_check') {
-                            if (timeDifference > 1.5) {
-                                console.log(`⚠️ Desync detected (${timeDifference.toFixed(2)}s). Snapping timelines together!`);
-                                vid.currentTime = data.time; 
+                            // Tightened from 1.5s to 0.4s to catch that 0.7s gap!
+                            if (timeDifference > 0.4) {
+                                console.log(`⚠️ Micro-desync detected (${timeDifference.toFixed(2)}s). Snapping!`);
+                                // Added + 0.1 to account for the Agora signal travel time
+                                vid.currentTime = data.time + 0.1; 
                             }
                         }
 
+                        // Normal user interactions
+                        if (data.action === 'seek') {
+                            if (timeDifference > 0.3) vid.currentTime = data.time + 0.1;
+                        }
+                        if (data.action === 'play') vid.play().catch(e=>console.log(e));
+                        if (data.action === 'pause') vid.pause();
+                        
+                        setTimeout(() => { isRemoteControl = false; }, 300);
                         // Normal user interactions
                         if (data.action === 'seek') {
                             if (timeDifference > 1) vid.currentTime = data.time;
