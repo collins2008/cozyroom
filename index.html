@@ -64,7 +64,7 @@
     <div id="main-app" class="hidden w-full h-full relative">
         
         <div id="video-layer" class="absolute inset-0 z-0 bg-black flex items-center justify-center">
-            <video id="cinema-player" class="w-full h-full object-contain hidden" controls preload="auto"></video>
+            <video id="cinema-player" class="w-full h-full object-contain hidden" controls></video>
         </div>
 
         <header id="header-ui" class="absolute top-6 left-6 right-6 flex justify-between items-start z-[60] transition-opacity duration-300 pointer-events-none">
@@ -140,7 +140,11 @@
     </div>
 
     <script>
+        // ==========================================
+        // PASTE YOUR NEW "COZYROOM" APP ID HERE ↓↓↓
+        // ==========================================
         const AGORA_APP_ID = "1200bba1607549c78691da498a9b4d2c"; 
+        // ==========================================
 
         const rtc = { client: null, localAudioTrack: null, localVideoTrack: null };
         const rtm = { client: null, channel: null };
@@ -157,7 +161,7 @@
 
         // --- THE MASTER REMOTE CONTROL ENGINE ---
         let isRemoteControl = false;
-        let isBuffering = false; // UPGRADE: Network choking state manager
+        let isBuffering = false; 
         
         function setupVideoSync() {
             const vid = document.getElementById('cinema-player');
@@ -180,14 +184,8 @@
             vid.onended = () => {
                 openMoviePrompt();
             };
-            // THE BACKGROUND HEARTBEAT
-            // Every 4 seconds, quietly check the partner's timestamp
-            setInterval(() => {
-                if (!vid.paused && rtm.channel) {
-                    rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'heartbeat_check', time: vid.currentTime }) });
-                }
-            }, 4000);
-            // UPGRADE: AUTO-PAUSE ON BUFFER
+
+            // AUTO-PAUSE ON BUFFER
             vid.addEventListener('waiting', () => {
                 console.log("⏳ Network choking! Buffering...");
                 isBuffering = true;
@@ -206,7 +204,7 @@
                 }
             });
 
-            // UPGRADE: THE DESYNC HEARTBEAT
+            // THE BACKGROUND HEARTBEAT
             setInterval(() => {
                 if (!vid.paused && !isBuffering && rtm.channel) {
                     rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'heartbeat_check', time: vid.currentTime }) });
@@ -229,7 +227,7 @@
             const vid = document.getElementById('cinema-player');
             let finalStreamUrl = url;
 
-            // SAFE CONVERTER: Changes dl=0 to raw=1 without deleting the secret rlkey!
+            // SAFE DROPBOX CONVERTER
             if (url.includes('dropbox.com')) {
                 if (url.includes('dl=0')) {
                     finalStreamUrl = url.replace('dl=0', 'raw=1');
@@ -238,7 +236,6 @@
                 }
                 console.log("Safe Dropbox link generated!");
             } else if (url.includes('drive.google.com/file/d/')) {
-                // Safely grabs the Google Drive ID
                 const id = url.split('/d/')[1].split('/')[0];
                 if (id) {
                     finalStreamUrl = `https://drive.google.com/uc?export=download&id=${id}`;
@@ -248,12 +245,10 @@
 
             vid.src = finalStreamUrl;
             vid.classList.remove('hidden');
-            
-            // Forces the video to load immediately
             vid.load(); 
-            vid.play().catch(e => console.log("Click the play button to start! Chrome blocked autoplay."));
+            vid.play().catch(e => console.log("Click play manually! Chrome blocked autoplay."));
         }
-        // --- BACK TO YOUR ORIGINAL WORKING ONLOAD ---
+
         window.onload = () => {
             const statusEl = document.getElementById('room-status');
             const joinBtn = document.getElementById('join-btn');
@@ -371,27 +366,24 @@
                         }
                     } else if (data.type === 'movie_load') {
                         loadMovie(data.url);
-                    } const vid = document.getElementById('cinema-player');
+                    } else if (data.type === 'sync') {
+                        const vid = document.getElementById('cinema-player');
                         isRemoteControl = true; 
                         
                         const timeDiff = Math.abs(vid.currentTime - data.time);
 
                         // --- NETFLIX SOFT SYNC ENGINE ---
-                        // 1. If someone manually clicks the timeline, OR if the network completely died (4+ seconds behind), do a hard snap.
                         if (data.action === 'seek' || timeDiff > 4.0) {
                             vid.currentTime = data.time;
                         } 
-                        // 2. If you are slightly behind, speed up the movie invisibly to 1.1x to catch up!
                         else if (vid.currentTime < data.time && timeDiff > 0.5) {
                             console.log("🐌 Slightly behind. Soft speed-up to 1.1x...");
                             vid.playbackRate = 1.1; 
                         } 
-                        // 3. If you are slightly ahead, slow down invisibly to let them catch up!
                         else if (vid.currentTime > data.time && timeDiff > 0.5) {
                             console.log("🐇 Slightly ahead. Soft slow-down to 0.9x...");
                             vid.playbackRate = 0.9;
                         } 
-                        // 4. You are in the perfect sync zone. Play normally!
                         else {
                             if (vid.playbackRate !== 1.0) {
                                 console.log("✅ Synced perfectly. Back to normal speed.");
@@ -399,45 +391,23 @@
                             }
                         }
 
-                        // Handle standard play/pause buttons
                         if (data.action === 'play') {
-                            vid.playbackRate = 1.0; // Reset speed on fresh play
+                            vid.playbackRate = 1.0; 
                             vid.play().catch(e=>console.log(e));
                         }
                         if (data.action === 'pause') {
                             vid.pause();
                         }
-                        // --------------------------------
 
-                        setTimeout(() => { isRemoteControl = false; }, 300);
-                        // Normal user interactions
-                        if (data.action === 'seek') {
-                            if (timeDifference > 1) vid.currentTime = data.time;
-                        }
-                        if (data.action === 'play') vid.play().catch(e=>console.log(e));
-                        if (data.action === 'pause') vid.pause();
-                        
                         setTimeout(() => { isRemoteControl = false; }, 300);
                     }
                 });
 
                 await rtc.client.join(AGORA_APP_ID, roomName, null, myIdNum);
 
-                // UPGRADE: Audio Engine Fix & Video Bandwidth Saver
-                rtc.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
-                    encoderConfig: "high_quality",
-                    AEC: true,  
-                    ANS: true,  
-                    AGC: false  
-                });
-                
+                rtc.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
                 rtc.localVideoTrack = await AgoraRTC.createCameraVideoTrack({
-                    encoderConfig: { 
-                        width: 320, 
-                        height: 240, 
-                        frameRate: 15, 
-                        bitrateMax: 300 
-                    }
+                    encoderConfig: "240p_1" 
                 });
 
                 rtc.localVideoTrack.play("local-video");
@@ -455,9 +425,8 @@
             }
         }
 
-        // UI Controls & Helpers
+        // UI Controls & Helpers (LINK GENERATOR FIXED HERE)
         function copyRoomLink() {
-            // UPGRADE: Clean Link Generator
             const link = `${window.location.origin}${window.location.pathname}?room=${roomName}`;
             navigator.clipboard.writeText(link);
             alert("Invite link copied! Send it over.");
