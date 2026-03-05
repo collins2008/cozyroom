@@ -180,7 +180,13 @@
             vid.onended = () => {
                 openMoviePrompt();
             };
-
+            // THE BACKGROUND HEARTBEAT
+            // Every 4 seconds, quietly check the partner's timestamp
+            setInterval(() => {
+                if (!vid.paused && rtm.channel) {
+                    rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'heartbeat_check', time: vid.currentTime }) });
+                }
+            }, 4000);
             // UPGRADE: AUTO-PAUSE ON BUFFER
             vid.addEventListener('waiting', () => {
                 console.log("⏳ Network choking! Buffering...");
