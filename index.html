@@ -365,39 +365,44 @@
                         }
                     } else if (data.type === 'movie_load') {
                         loadMovie(data.url);
-                    } else if (data.type === 'sync') {
-                        const vid = document.getElementById('cinema-player');
+                    } const vid = document.getElementById('cinema-player');
                         isRemoteControl = true; 
                         
-                        // UPGRADE: Full Remote Buffer Logic integration
-                        // UPGRADE: Hyper-Strict Desync tolerance
-                        const timeDifference = Math.abs(vid.currentTime - data.time);
+                        const timeDiff = Math.abs(vid.currentTime - data.time);
 
-                        if (data.action === 'pause_for_buffer') {
-                            vid.pause();
-                            console.log("Partner is buffering. Pausing to wait for them...");
-                        }
-                        if (data.action === 'resume_from_buffer') {
-                            vid.play().catch(e=>console.log(e));
-                            console.log("Partner caught up. Playing...");
-                        }
-                        
-                        if (data.action === 'heartbeat_check') {
-                            // Tightened from 1.5s to 0.4s to catch that 0.7s gap!
-                            if (timeDifference > 0.4) {
-                                console.log(`⚠️ Micro-desync detected (${timeDifference.toFixed(2)}s). Snapping!`);
-                                // Added + 0.1 to account for the Agora signal travel time
-                                vid.currentTime = data.time + 0.1; 
+                        // --- NETFLIX SOFT SYNC ENGINE ---
+                        // 1. If someone manually clicks the timeline, OR if the network completely died (4+ seconds behind), do a hard snap.
+                        if (data.action === 'seek' || timeDiff > 4.0) {
+                            vid.currentTime = data.time;
+                        } 
+                        // 2. If you are slightly behind, speed up the movie invisibly to 1.1x to catch up!
+                        else if (vid.currentTime < data.time && timeDiff > 0.5) {
+                            console.log("🐌 Slightly behind. Soft speed-up to 1.1x...");
+                            vid.playbackRate = 1.1; 
+                        } 
+                        // 3. If you are slightly ahead, slow down invisibly to let them catch up!
+                        else if (vid.currentTime > data.time && timeDiff > 0.5) {
+                            console.log("🐇 Slightly ahead. Soft slow-down to 0.9x...");
+                            vid.playbackRate = 0.9;
+                        } 
+                        // 4. You are in the perfect sync zone. Play normally!
+                        else {
+                            if (vid.playbackRate !== 1.0) {
+                                console.log("✅ Synced perfectly. Back to normal speed.");
+                                vid.playbackRate = 1.0;
                             }
                         }
 
-                        // Normal user interactions
-                        if (data.action === 'seek') {
-                            if (timeDifference > 0.3) vid.currentTime = data.time + 0.1;
+                        // Handle standard play/pause buttons
+                        if (data.action === 'play') {
+                            vid.playbackRate = 1.0; // Reset speed on fresh play
+                            vid.play().catch(e=>console.log(e));
                         }
-                        if (data.action === 'play') vid.play().catch(e=>console.log(e));
-                        if (data.action === 'pause') vid.pause();
-                        
+                        if (data.action === 'pause') {
+                            vid.pause();
+                        }
+                        // --------------------------------
+
                         setTimeout(() => { isRemoteControl = false; }, 300);
                         // Normal user interactions
                         if (data.action === 'seek') {
