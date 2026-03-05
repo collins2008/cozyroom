@@ -343,7 +343,593 @@
                         setTimeout(() => { isRemoteControl = false; }, 300);
                     }
                 });
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vibe Space - Cinema Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    
+    <script src="https://unpkg.com/agora-rtc-sdk-ng"></script>
+    <script src="https://unpkg.com/agora-rtm-sdk@1.5.1"></script>
 
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { 'cute': ['Nunito', 'sans-serif'], 'pixel': ['"Press Start 2P"', 'cursive'] }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { overflow: hidden; background-color: #000000; color: white; }
+        .glass { background: rgba(10, 10, 10, 0.7); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+        .animate-float { animation: float 4s ease-in-out infinite; }
+        .speaking { box-shadow: 0 0 20px 3px rgba(59, 130, 246, 0.9); border-color: #3b82f6 !important; }
+        .draggable-avatar { position: absolute; cursor: grab; z-index: 20; user-select: none; }
+        .draggable-avatar:active { cursor: grabbing; z-index: 50; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
+        
+        #local-video video, [id^="remote-video-"] video { object-fit: cover !important; border-radius: 0.75rem; }
+        
+        /* Custom Video Controls styling for the cinema player */
+        video::-webkit-media-controls-panel { background: linear-gradient(to top, rgba(0,0,0,0.9), transparent); }
+    </style>
+</head>
+<body class="font-cute h-screen w-screen relative">
+
+    <div id="login-screen" class="absolute inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-xl transition-opacity duration-500">
+        <div class="glass p-10 rounded-3xl w-full max-w-md text-center flex flex-col items-center border border-white/5">
+            <h1 class="text-3xl font-black text-white mb-2 tracking-tight">Vibe Space</h1>
+            <p id="room-status" class="text-blue-500 font-bold mb-8 text-xs uppercase tracking-widest">INITIALIZING ENGINE...</p>
+            
+            <input type="text" id="username" placeholder="Collins" class="w-full px-6 py-4 rounded-2xl bg-[#0a0a0a] text-white border border-gray-800 focus:border-blue-500 outline-none text-lg mb-8 shadow-inner font-bold placeholder-gray-600">
+            
+            <div class="flex gap-4 mb-10">
+                <button onclick="selectAvatar('duck')" id="btn-duck" class="avatar-btn w-16 h-16 rounded-2xl bg-[#111] border-2 border-transparent hover:border-blue-500 flex items-center justify-center text-3xl transition-all shadow-lg border-blue-500">🦆</button>
+                <button onclick="selectAvatar('knight')" id="btn-knight" class="avatar-btn w-16 h-16 rounded-2xl bg-[#111] border-2 border-transparent hover:border-blue-500 flex items-center justify-center text-3xl transition-all shadow-lg">♘</button>
+                <button onclick="selectAvatar('alien')" id="btn-alien" class="avatar-btn w-16 h-16 rounded-2xl bg-[#111] border-2 border-transparent hover:border-blue-500 flex items-center justify-center text-3xl transition-all shadow-lg">👾</button>
+            </div>
+
+            <button onclick="enterSpace()" id="join-btn" disabled class="w-full bg-white text-black hover:bg-gray-200 disabled:bg-gray-800 disabled:text-gray-500 font-black text-lg py-4 rounded-2xl transition-all shadow-xl">
+                Enter Space
+            </button>
+        </div>
+    </div>
+
+    <div id="main-app" class="hidden w-full h-full relative">
+        
+        <div id="video-layer" class="absolute inset-0 z-0 bg-black flex items-center justify-center">
+            <video id="cinema-player" class="w-full h-full object-contain hidden" controls preload="auto" crossorigin="anonymous"></video>
+        </div>
+
+        <header id="header-ui" class="absolute top-6 left-6 right-6 flex justify-between items-start z-[60] transition-opacity duration-300 pointer-events-none">
+            <div class="flex flex-col gap-3 pointer-events-auto">
+                <div class="glass flex items-center gap-3 px-4 py-3 rounded-2xl">
+                    <div class="text-lg animate-pulse">📻</div>
+                    <div class="w-32 overflow-hidden font-pixel text-[8px] text-gray-300">
+                        <marquee scrollamount="3">Vibe Space Cinema Active 🎥</marquee>
+                    </div>
+                </div>
+                <button onclick="copyRoomLink()" class="glass px-4 py-2 rounded-xl text-xs font-bold text-gray-300 hover:text-white transition-colors flex items-center gap-2">
+                    <span class="material-icons text-sm">link</span> Copy Invite Link
+                </button>
+            </div>
+
+            <div id="video-feeds" class="flex flex-col gap-3 pointer-events-auto items-end">
+                <button onclick="toggleLowData()" id="data-btn" class="glass px-3 py-2 rounded-xl font-bold text-green-500 hover:bg-white/5 transition-all flex items-center gap-2 text-[10px] uppercase tracking-wider">
+                    <span class="material-icons text-sm">network_check</span> <span id="data-text">Stable</span>
+                </button>
+                
+                <div id="local-video-wrapper" class="w-32 h-24 overflow-hidden rounded-xl border border-gray-800 bg-[#0a0a0a] shadow-xl relative">
+                    <span class="absolute bottom-1 left-1 text-[8px] bg-black/70 px-1 rounded text-white z-10 pointer-events-none">You</span>
+                    <div id="local-video" class="w-full h-full"></div>
+                </div>
+
+                <div id="remote-video-container" class="flex flex-col gap-3"></div>
+            </div>
+        </header>
+
+        <button onclick="toggleCinemaMode()" id="cinema-exit-btn" class="hidden absolute top-6 right-6 z-[70] glass px-4 py-2 rounded-xl font-bold text-white hover:bg-white/10 transition-all flex items-center gap-2 text-xs shadow-2xl pointer-events-auto">
+            <span class="material-icons text-sm">close_fullscreen</span> Show UI
+        </button>
+
+        <div id="avatar-space" class="absolute inset-0 z-20 pointer-events-none"></div>
+
+        <div id="bottom-ui" class="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-3 z-[60] w-full max-w-xl px-6 pointer-events-none">
+            <div id="chat-log" class="w-full h-20 overflow-y-auto text-[11px] font-bold flex flex-col gap-1 pointer-events-auto mask-image: linear-gradient(to top, black 80%, transparent); text-shadow: 0 1px 2px rgba(0,0,0,0.8);"></div>
+
+            <div class="flex gap-2 w-full pointer-events-auto items-center">
+                <form onsubmit="sendChat(event)" class="flex-1 relative transition-all duration-300">
+                    <input type="text" id="chat-input" placeholder="Type a thought..." class="w-full glass py-3 px-5 rounded-2xl text-white placeholder-gray-500 outline-none font-bold focus:border-white/30 transition-all text-sm shadow-xl focus:opacity-100 hover:opacity-100">
+                    <button type="submit" class="absolute right-1 top-1 hover:bg-white/10 text-white p-2 rounded-xl transition-all">
+                        <span class="material-icons text-sm">send</span>
+                    </button>
+                </form>
+
+                <div id="media-dock" class="glass px-5 py-2 rounded-2xl flex items-center gap-4 shadow-xl transition-all duration-300 origin-right">
+                    <button onclick="toggleMic()" id="mic-btn" class="text-gray-400 hover:text-white transition-colors p-1.5" title="Mute Mic"><span class="material-icons text-xl">mic</span></button>
+                    <button onclick="toggleVid()" id="vid-btn" class="text-gray-400 hover:text-white transition-colors p-1.5" title="Turn off Camera"><span class="material-icons text-xl">videocam</span></button>
+                    <div class="w-px h-5 bg-gray-700 mx-1"></div>
+                    <button onclick="openMoviePrompt()" class="text-purple-400 hover:text-purple-300 transition-colors p-1.5 flex items-center" title="Load Google Drive Movie">
+                        <span class="material-icons text-xl">movie</span>
+                    </button>
+                    <div class="w-px h-5 bg-gray-700 mx-1"></div>
+                    <button onclick="toggleCinemaMode()" class="text-blue-400 hover:text-blue-300 transition-colors p-1.5" title="Cinema Mode (Hide UI)"><span class="material-icons text-xl">theaters</span></button>
+                    <div class="w-px h-5 bg-gray-700 mx-1"></div>
+                    <button onclick="location.reload()" class="text-red-500 hover:text-red-400 p-1.5 transition-colors"><span class="material-icons text-xl">logout</span></button>
+                </div>
+            </div>
+        </div>
+
+        <div id="movie-modal" class="hidden absolute inset-0 z-[80] bg-black/80 backdrop-blur-md flex items-center justify-center pointer-events-auto">
+            <div class="glass p-8 rounded-3xl w-full max-w-lg text-center border border-white/10 shadow-2xl">
+                <h2 class="text-2xl font-black text-white mb-4">Load Episode</h2>
+                <p class="text-xs text-gray-400 mb-6">Paste the Dropbox or Google Drive Link below. It will automatically load on everyone's screen.</p>
+                <input type="text" id="movie-url" placeholder="Paste link here..." class="w-full px-5 py-3 rounded-xl bg-[#0a0a0a] text-white border border-gray-700 focus:border-purple-500 outline-none text-sm mb-6">
+                <div class="flex gap-4 justify-center">
+                    <button onclick="closeMoviePrompt()" class="px-6 py-2 rounded-xl text-white font-bold hover:bg-white/10 transition-all">Cancel</button>
+                    <button onclick="broadcastMovie()" class="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-lg">Beam to Room</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // PASTE YOUR NEW "COZYROOM" APP ID HERE ↓↓↓
+        // ==========================================
+        const AGORA_APP_ID = "1200bba1607549c78691da498a9b4d2c"; 
+        // ==========================================
+
+        const rtc = { client: null, localAudioTrack: null, localVideoTrack: null };
+        const rtm = { client: null, channel: null };
+
+        const myIdNum = Math.floor(Math.random() * 1000000);
+        const myIdStr = myIdNum.toString(); 
+
+        let profile = { name: "Guest", avatar: "duck" };
+        let isLowData = false; let isAudioMuted = false; let isVideoOff = false; let isCinemaMode = false;
+        const avatarMap = { 'duck': '🦆', 'knight': '♘', 'alien': '👾' };
+        
+        let roomName = new URLSearchParams(window.location.search).get('room');
+        if(!roomName) roomName = 'vibe_' + Math.random().toString(36).substr(2, 6);
+
+        // --- THE MASTER REMOTE CONTROL ENGINE ---
+        let isRemoteControl = false;
+        let isBuffering = false; // UPGRADE: Network choking state manager
+        
+        function setupVideoSync() {
+            const vid = document.getElementById('cinema-player');
+            
+            vid.onplay = () => {
+                if(!isRemoteControl && rtm.channel && !isBuffering) {
+                    rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'play', time: vid.currentTime }) });
+                }
+            };
+            vid.onpause = () => {
+                if(!isRemoteControl && rtm.channel && !isBuffering) {
+                    rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'pause', time: vid.currentTime }) });
+                }
+            };
+            vid.onseeked = () => {
+                if(!isRemoteControl && rtm.channel) {
+                    rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'seek', time: vid.currentTime }) });
+                }
+            };
+            vid.onended = () => {
+                openMoviePrompt();
+            };
+
+            // UPGRADE: AUTO-PAUSE ON BUFFER
+            vid.addEventListener('waiting', () => {
+                console.log("⏳ Network choking! Buffering...");
+                isBuffering = true;
+                if(rtm.channel) {
+                    rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'pause_for_buffer', time: vid.currentTime }) });
+                }
+            });
+
+            vid.addEventListener('playing', () => {
+                if (isBuffering) {
+                    console.log("✅ Network caught up! Resuming stream...");
+                    isBuffering = false;
+                    if(rtm.channel) {
+                        rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'resume_from_buffer', time: vid.currentTime }) });
+                    }
+                }
+            });
+
+            // UPGRADE: THE DESYNC HEARTBEAT (Checks every 4 seconds)
+            setInterval(() => {
+                if (!vid.paused && !isBuffering && rtm.channel) {
+                    rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'heartbeat_check', time: vid.currentTime }) });
+                }
+            }, 4000);
+        }
+
+        function openMoviePrompt() { document.getElementById('movie-modal').classList.remove('hidden'); }
+        function closeMoviePrompt() { document.getElementById('movie-modal').classList.add('hidden'); }
+
+        function broadcastMovie() {
+            const url = document.getElementById('movie-url').value.trim();
+            if(!url) return;
+            closeMoviePrompt();
+            loadMovie(url);
+            if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url: url }) });
+        }
+
+        function loadMovie(url) {
+            const vid = document.getElementById('cinema-player');
+            let finalStreamUrl = url;
+
+            // UPGRADE: Smart Converter handles Dropbox and Google Drive links automatically
+            if (url.includes('dropbox.com')) {
+                // Strip out ?dl=0 and force &raw=1
+                finalStreamUrl = url.split('?')[0] + '?raw=1';
+                console.log("Auto-converted Dropbox link!");
+            } else if (url.includes('drive.google.com/file/d/')) {
+                const match = url.match(/\/d\/(.+?)\//);
+                if (match && match[1]) {
+                    finalStreamUrl = `https://drive.google.com/uc?export=download&id=${match[1]}`;
+                    console.log("Auto-converted Google Drive link!");
+                }
+            }
+
+            vid.src = finalStreamUrl;
+            vid.classList.remove('hidden');
+            vid.play().catch(e => console.log("Autoplay waiting for user interaction..."));
+        }
+
+        window.onload = () => {
+            const statusEl = document.getElementById('room-status');
+            const joinBtn = document.getElementById('join-btn');
+            if (typeof AgoraRTC === 'undefined' || typeof AgoraRTM === 'undefined') {
+                statusEl.innerText = "ERROR: NETWORK BLOCKED AGORA! Turn on VPN.";
+                statusEl.classList.replace('text-blue-500', 'text-red-500'); return;
+            }
+            statusEl.innerText = "AGORA ENGINE READY";
+            statusEl.classList.replace('text-blue-500', 'text-green-500');
+            joinBtn.disabled = false;
+        };
+
+        function selectAvatar(type) {
+            profile.avatar = type;
+            document.querySelectorAll('.avatar-btn').forEach(b => b.classList.replace('border-blue-500', 'border-transparent'));
+            document.getElementById(`btn-${type}`).classList.replace('border-transparent', 'border-blue-500');
+        }
+
+        async function enterSpace() {
+            if (AGORA_APP_ID === "YOUR_COZYROOM_APP_ID_HERE") {
+                alert("Omo! Paste your CozyRoom App ID in the code first! 😭"); return;
+            }
+
+            const inputName = document.getElementById('username').value.trim();
+            if(inputName) profile.name = inputName;
+
+            document.getElementById('login-screen').style.opacity = '0';
+            setTimeout(() => {
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('main-app').classList.remove('hidden');
+                spawnAvatarUI(myIdStr, profile.name, profile.avatar, true);
+            }, 500);
+
+            try {
+                rtc.client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+                
+                rtc.client.enableAudioVolumeIndicator();
+                rtc.client.on("volume-indicator", volumes => {
+                    volumes.forEach((volume) => {
+                        const ring = document.getElementById(`ring-${volume.uid}`);
+                        if (ring) {
+                            if (volume.level > 10) ring.classList.add('speaking');
+                            else ring.classList.remove('speaking');
+                        }
+                    });
+                });
+
+                rtc.client.on("user-published", async (user, mediaType) => {
+                    await rtc.client.subscribe(user, mediaType);
+                    
+                    if (mediaType === "video") {
+                        const wrapper = document.getElementById("remote-video-container");
+                        
+                        let box = document.getElementById(`remote-box-${user.uid}`);
+                        if (!box) {
+                            box = document.createElement("div");
+                            box.id = `remote-box-${user.uid}`;
+                            box.className = "w-32 h-24 overflow-hidden rounded-xl border border-gray-800 bg-[#0a0a0a] shadow-xl relative";
+                            
+                            let label = document.createElement("span");
+                            label.className = "absolute bottom-1 left-1 text-[8px] bg-black/70 px-1 rounded text-white z-10 pointer-events-none";
+                            label.innerText = "Friend";
+                            
+                            let player = document.createElement("div");
+                            player.id = `remote-video-${user.uid}`;
+                            player.className = "w-full h-full";
+                            
+                            box.appendChild(player);
+                            box.appendChild(label);
+                            wrapper.appendChild(box);
+                        }
+                        user.videoTrack.play(`remote-video-${user.uid}`, { fit: "cover" });
+                    }
+                    if (mediaType === "audio") {
+                        user.audioTrack.play();
+                    }
+                });
+
+                rtc.client.on("user-unpublished", (user, mediaType) => {
+                    if(mediaType === "video") {
+                        const box = document.getElementById(`remote-box-${user.uid}`);
+                        if(box) box.remove();
+                    }
+                });
+
+                rtc.client.on("user-left", (user) => {
+                    const el = document.getElementById(`avatar-${user.uid}`);
+                    if(el) el.remove();
+                    const box = document.getElementById(`remote-box-${user.uid}`);
+                    if(box) box.remove();
+                    appendLog("System", "Someone disconnected.");
+                });
+
+                rtm.client = AgoraRTM.createInstance(AGORA_APP_ID);
+                await rtm.client.login({ uid: myIdStr });
+                rtm.channel = rtm.client.createChannel(roomName);
+                await rtm.channel.join();
+
+                rtm.channel.on('ChannelMessage', ({ text }, senderId) => {
+                    const data = JSON.parse(text);
+                    if(data.type === 'profile') {
+                        spawnAvatarUI(senderId, data.data.name, data.data.avatar, false);
+                    } else if(data.type === 'chat') {
+                        showSpeechBubble(senderId, data.msg);
+                        appendLog(data.sender, data.msg);
+                    } else if(data.type === 'request_profiles') {
+                        rtm.channel.sendMessage({ text: JSON.stringify({ type: 'profile', data: profile }) });
+                        
+                        const vid = document.getElementById('cinema-player');
+                        if (vid.src && !vid.paused) {
+                            rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url: vid.src }) });
+                            setTimeout(() => {
+                                rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'play', time: vid.currentTime }) });
+                            }, 1000);
+                        }
+                    } else if (data.type === 'movie_load') {
+                        loadMovie(data.url);
+                    } else if (data.type === 'sync') {
+                        const vid = document.getElementById('cinema-player');
+                        isRemoteControl = true; 
+                        
+                        // UPGRADE: Full Remote Buffer & Heartbeat Logic
+                        const timeDifference = Math.abs(vid.currentTime - data.time);
+
+                        if (data.action === 'pause_for_buffer') {
+                            vid.pause();
+                            console.log("Partner is buffering. Pausing to wait for them...");
+                        }
+                        if (data.action === 'resume_from_buffer') {
+                            vid.play().catch(e=>console.log(e));
+                            console.log("Partner caught up. Playing...");
+                        }
+                        if (data.action === 'heartbeat_check') {
+                            if (timeDifference > 1.5) {
+                                console.log(`⚠️ Desync detected (${timeDifference.toFixed(2)}s). Snapping timelines together!`);
+                                vid.currentTime = data.time; 
+                            }
+                        }
+
+                        // Normal user interactions
+                        if (data.action === 'seek') {
+                            if (timeDifference > 1) vid.currentTime = data.time;
+                        }
+                        if (data.action === 'play') vid.play().catch(e=>console.log(e));
+                        if (data.action === 'pause') vid.pause();
+                        
+                        setTimeout(() => { isRemoteControl = false; }, 300);
+                    }
+                });
+
+                await rtc.client.join(AGORA_APP_ID, roomName, null, myIdNum);
+
+                // UPGRADE: Audio Engine Fix (AEC/ANS On, AGC Off) + Bandwidth Saver (240p)
+                rtc.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
+                    encoderConfig: "high_quality",
+                    AEC: true,  
+                    ANS: true,  
+                    AGC: false  
+                });
+                
+                rtc.localVideoTrack = await AgoraRTC.createCameraVideoTrack({
+                    encoderConfig: { 
+                        width: 320, 
+                        height: 240, 
+                        frameRate: 15, 
+                        bitrateMax: 300 
+                    }
+                });
+
+                rtc.localVideoTrack.play("local-video");
+                await rtc.client.publish([rtc.localAudioTrack, rtc.localVideoTrack]);
+
+                rtm.channel.sendMessage({ text: JSON.stringify({ type: 'profile', data: profile }) });
+                rtm.channel.sendMessage({ text: JSON.stringify({ type: 'request_profiles' }) });
+
+                setupVideoSync();
+                appendLog("System", "Connected via Agora Premium Network.");
+
+            } catch (err) {
+                console.error("Agora Error:", err);
+                appendLog("System Error", err.message);
+            }
+        }
+
+        // UI Controls & Helpers
+        function copyRoomLink() {
+            let path = window.location.pathname;
+            if (!path.endsWith('/')) { path += '/'; }
+            const link = `${window.location.origin}${path}?room=${roomName}`;
+            navigator.clipboard.writeText(link);
+            alert("Invite link copied! Send it over.");
+        }
+
+        function toggleCinemaMode() {
+            isCinemaMode = !isCinemaMode;
+            const header = document.getElementById('header-ui');
+            const mediaDock = document.getElementById('media-dock');
+            const exitBtn = document.getElementById('cinema-exit-btn');
+            const chatInput = document.getElementById('chat-input');
+
+            if (isCinemaMode) {
+                header.classList.add('opacity-0', 'pointer-events-none');
+                mediaDock.classList.add('opacity-0', 'pointer-events-none', 'scale-95');
+                setTimeout(() => { header.classList.add('hidden'); mediaDock.classList.add('hidden'); exitBtn.classList.remove('hidden'); }, 300);
+                chatInput.classList.remove('glass');
+                chatInput.classList.add('bg-black/40', 'backdrop-blur-sm', 'border', 'border-white/10', 'opacity-50');
+            } else {
+                header.classList.remove('hidden');
+                mediaDock.classList.remove('hidden');
+                exitBtn.classList.add('hidden');
+                setTimeout(() => { header.classList.remove('opacity-0', 'pointer-events-none'); mediaDock.classList.remove('opacity-0', 'pointer-events-none', 'scale-95'); }, 10);
+                chatInput.classList.remove('bg-black/40', 'backdrop-blur-sm', 'border', 'border-white/10', 'opacity-50');
+                chatInput.classList.add('glass');
+            }
+        }
+
+        function toggleMic() {
+            isAudioMuted = !isAudioMuted;
+            if(rtc.localAudioTrack) rtc.localAudioTrack.setMuted(isAudioMuted);
+            document.getElementById('mic-btn').innerHTML = `<span class="material-icons text-xl ${isAudioMuted ? 'text-red-500' : 'text-gray-400 hover:text-white'}">${isAudioMuted ? 'mic_off' : 'mic'}</span>`;
+        }
+
+        function toggleVid() {
+            if(isLowData) return; 
+            isVideoOff = !isVideoOff;
+            if(rtc.localVideoTrack) rtc.localVideoTrack.setMuted(isVideoOff);
+            document.getElementById('vid-btn').innerHTML = `<span class="material-icons text-xl ${isVideoOff ? 'text-red-500' : 'text-gray-400 hover:text-white'}">${isVideoOff ? 'videocam_off' : 'videocam'}</span>`;
+        }
+
+        function toggleLowData() {
+            isLowData = !isLowData;
+            const btn = document.getElementById('data-btn');
+            const text = document.getElementById('data-text');
+            if (isLowData) {
+                btn.classList.replace('text-green-500', 'text-red-500'); text.innerText = "Low Data";
+                if(rtc.localVideoTrack) rtc.localVideoTrack.setEnabled(false);
+            } else {
+                btn.classList.replace('text-red-500', 'text-green-500'); text.innerText = "Stable";
+                if(rtc.localVideoTrack && !isVideoOff) rtc.localVideoTrack.setEnabled(true);
+            }
+        }
+
+        function sendChat(e) {
+            e.preventDefault();
+            const input = document.getElementById('chat-input');
+            const msg = input.value.trim();
+            if(!msg) return;
+
+            showSpeechBubble(myIdStr, msg);
+            appendLog("You", msg);
+            if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'chat', msg: msg, sender: profile.name }) });
+            input.value = '';
+        }
+
+        function appendLog(sender, msg) {
+            const log = document.getElementById('chat-log');
+            const entry = document.createElement('div');
+            entry.innerHTML = `<span class="text-white/50">${sender}:</span> <span class="text-white">${msg}</span>`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function showSpeechBubble(peerId, text) {
+            const container = document.getElementById(`avatar-inner-${peerId}`);
+            if(!container) return;
+
+            const old = container.querySelector('.speech-bubble');
+            if(old) old.remove();
+
+            const bubble = document.createElement('div');
+            bubble.className = 'speech-bubble absolute -top-10 left-1/2 transform -translate-x-1/2 bg-white text-black px-3 py-1 rounded-xl font-bold shadow-2xl whitespace-nowrap z-50 text-[10px] transition-all';
+            bubble.innerText = text;
+            const pointer = document.createElement('div');
+            pointer.className = 'absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-white rotate-45';
+            bubble.appendChild(pointer);
+
+            container.appendChild(bubble);
+            setTimeout(() => { if(bubble.parentNode) bubble.remove(); }, 5000);
+        }
+
+        function makeDraggable(element) {
+            let startX = 0, startY = 0;
+            element.onmousedown = dragMouseDown;
+            function dragMouseDown(e) {
+                e = e || window.event;
+                if(e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+                e.preventDefault();
+                startX = e.clientX; startY = e.clientY;
+                document.querySelectorAll('.draggable-avatar').forEach(el => el.style.zIndex = '20');
+                element.style.zIndex = '50';
+                document.onmouseup = closeDragElement;
+                document.onmousemove = elementDrag;
+            }
+            function elementDrag(e) {
+                e = e || window.event; e.preventDefault();
+                let dx = startX - e.clientX; let dy = startY - e.clientY;
+                startX = e.clientX; startY = e.clientY;
+                element.style.top = (element.offsetTop - dy) + "px";
+                element.style.left = (element.offsetLeft - dx) + "px";
+            }
+            function closeDragElement() { document.onmouseup = null; document.onmousemove = null; }
+        }
+
+        function spawnAvatarUI(id, name, avatarType, isLocal) {
+            const space = document.getElementById('avatar-space');
+            if(document.getElementById(`avatar-${id}`)) return; 
+
+            const outerWrapper = document.createElement('div');
+            outerWrapper.id = `avatar-${id}`;
+            outerWrapper.className = `draggable-avatar pointer-events-auto`;
+            
+            const centerX = window.innerWidth / 2; const centerY = window.innerHeight / 2;
+            const offsetX = isLocal ? -40 : 40; 
+            
+            outerWrapper.style.left = `${(centerX + offsetX) - 30}px`; 
+            outerWrapper.style.top = `${centerY - 30}px`;
+
+            const innerWrapper = document.createElement('div');
+            innerWrapper.id = `avatar-inner-${id}`;
+            innerWrapper.className = `flex flex-col items-center animate-float relative`;
+
+            const nameTag = document.createElement('div');
+            nameTag.className = 'bg-black/80 text-white px-2 py-0.5 rounded-full text-[9px] font-bold mb-1 border border-white/10 shadow-lg pointer-events-none';
+            nameTag.innerText = name + (isLocal ? " (You)" : "");
+
+            const imgDiv = document.createElement('div');
+            imgDiv.id = `ring-${id}`;
+            imgDiv.className = 'w-14 h-14 bg-[#111] border border-gray-800 rounded-full flex items-center justify-center text-2xl shadow-xl transition-all duration-200 cursor-pointer';
+            imgDiv.innerText = avatarMap[avatarType] || '👤';
+
+            innerWrapper.appendChild(nameTag);
+            innerWrapper.appendChild(imgDiv);
+            outerWrapper.appendChild(innerWrapper);
+            space.appendChild(outerWrapper);
+
+            makeDraggable(outerWrapper);
+        }
+    </script>
+</body>
+</html>
                 await rtc.client.join(AGORA_APP_ID, roomName, null, myIdNum);
 
                 // DATA SAVER HACK: 240p reduces internet weight by 80%, kills audio lag instantly.
