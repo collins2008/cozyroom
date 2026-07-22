@@ -140,11 +140,7 @@
     </div>
 
     <script>
-        // ==========================================
-        // PASTE YOUR NEW "COZYROOM" APP ID HERE ↓↓↓
-        // ==========================================
         const AGORA_APP_ID = "1200bba1607549c78691da498a9b4d2c"; 
-        // ==========================================
 
         const rtc = { client: null, localAudioTrack: null, localVideoTrack: null };
         const rtm = { client: null, channel: null };
@@ -160,58 +156,38 @@
         if(!roomName) roomName = 'vibe_' + Math.random().toString(36).substr(2, 6);
 
         // --- THE MASTER REMOTE CONTROL ENGINE (FIXED) ---
-        let isBuffering = false; 
-        
-        // Use explicit flags to prevent endless bouncing loops
-        let ignoreNextSeek = false;
-        let ignoreNextPlay = false;
-        let ignoreNextPause = false;
-        
+        let isRemoteAction = false;
+        let remoteActionTimeout = null;
+
+        // This locks local events for 800ms when a command is received
+        // so that the browser reacting doesn't accidentally send a command back!
+        function lockSyncForRemote() {
+            isRemoteAction = true;
+            clearTimeout(remoteActionTimeout);
+            remoteActionTimeout = setTimeout(() => { isRemoteAction = false; }, 800);
+        }
+
         function setupVideoSync() {
             const vid = document.getElementById('cinema-player');
-            
-            vid.onplay = () => {
-                if (ignoreNextPlay) { ignoreNextPlay = false; return; }
-                if(rtm.channel && !isBuffering) {
-                    rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'play', time: vid.currentTime }) });
-                }
-            };
-            vid.onpause = () => {
-                if (ignoreNextPause) { ignoreNextPause = false; return; }
-                if(rtm.channel && !isBuffering) {
-                    rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'pause', time: vid.currentTime }) });
-                }
-            };
-            vid.onseeked = () => {
-                if (ignoreNextSeek) { ignoreNextSeek = false; return; }
-                if(rtm.channel) {
-                    rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'seek', time: vid.currentTime }) });
-                }
-            };
-            vid.onended = () => { openMoviePrompt(); };
 
-            // AUTO-PAUSE ON BUFFER
-            vid.addEventListener('waiting', () => {
-                console.log("⏳ Network choking! Buffering...");
-                isBuffering = true;
-                if(rtm.channel) {
-                    rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'pause_for_buffer', time: vid.currentTime }) });
-                }
+            vid.addEventListener('play', () => {
+                if (isRemoteAction) return;
+                if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'play', time: vid.currentTime }) });
             });
 
-            vid.addEventListener('playing', () => {
-                if (isBuffering) {
-                    console.log("✅ Network caught up! Resuming stream...");
-                    isBuffering = false;
-                    if(rtm.channel) {
-                        rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'resume_from_buffer', time: vid.currentTime }) });
-                    }
-                }
+            vid.addEventListener('pause', () => {
+                if (isRemoteAction) return;
+                if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'pause', time: vid.currentTime }) });
             });
 
-            // THE BACKGROUND HEARTBEAT
+            vid.addEventListener('seeked', () => {
+                if (isRemoteAction) return;
+                if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'seek', time: vid.currentTime }) });
+            });
+
+            // THE BACKGROUND HEARTBEAT - Keeps everyone perfectly aligned
             setInterval(() => {
-                if (!vid.paused && !isBuffering && rtm.channel) {
+                if (!vid.paused && rtm.channel && !isRemoteAction) {
                     rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'heartbeat_check', time: vid.currentTime }) });
                 }
             }, 4000);
@@ -224,7 +200,7 @@
             const url = document.getElementById('movie-url').value.trim();
             if(!url) return;
             closeMoviePrompt();
-            loadMovie(url, false, 0); // Start playing at 0 locally
+            loadMovie(url, false, 0); 
             if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url: url, isPaused: false, time: 0 }) });
         }
 
@@ -232,7 +208,6 @@
             const vid = document.getElementById('cinema-player');
             let finalStreamUrl = url;
 
-            // SAFE DROPBOX & DRIVE CONVERTER
             if (url.includes('dropbox.com')) {
                 if (url.includes('dl=0')) finalStreamUrl = url.replace('dl=0', 'raw=1');
                 else if (!url.includes('raw=1')) finalStreamUrl = url + (url.includes('?') ? '&raw=1' : '?raw=1');
@@ -241,19 +216,18 @@
                 if (id) finalStreamUrl = `https://drive.google.com/uc?export=download&id=${id}`;
             }
 
-            // Fix: Don't constantly reload if someone new joins the room!
+            // If the movie is already loaded, just sync the time/state
             if (vid.src === finalStreamUrl || vid.src.includes(finalStreamUrl)) {
                 if (Math.abs(vid.currentTime - startTime) > 2.0) {
-                    ignoreNextSeek = true;
+                    lockSyncForRemote();
                     vid.currentTime = startTime;
-                    setTimeout(() => { ignoreNextSeek = false; }, 1000);
                 }
                 if (startPaused && !vid.paused) {
-                    ignoreNextPause = true; vid.pause();
-                    setTimeout(() => { ignoreNextPause = false; }, 1000);
+                    lockSyncForRemote(); 
+                    vid.pause();
                 } else if (!startPaused && vid.paused) {
-                    ignoreNextPlay = true; vid.play().catch(e=>console.log(e));
-                    setTimeout(() => { ignoreNextPlay = false; }, 1000);
+                    lockSyncForRemote(); 
+                    vid.play().catch(e=>console.log(e));
                 }
                 return;
             }
@@ -261,20 +235,18 @@
             vid.src = finalStreamUrl;
             vid.classList.remove('hidden');
             
-            // Lock UI so loading doesn't bounce events back
-            ignoreNextPlay = true; ignoreNextPause = true; ignoreNextSeek = true;
+            lockSyncForRemote();
             vid.load(); 
             
             setTimeout(() => {
+                lockSyncForRemote(); // Renew lock before state change
                 vid.currentTime = startTime;
                 if (startPaused) {
                     vid.pause();
                 } else {
                     vid.play().catch(e => console.log("Click play manually! Chrome blocked autoplay."));
                 }
-                // Unlock
-                setTimeout(() => { ignoreNextPlay = false; ignoreNextPause = false; ignoreNextSeek = false; }, 1000);
-            }, 200);
+            }, 300);
         }
 
         window.onload = () => {
@@ -386,7 +358,7 @@
                         rtm.channel.sendMessage({ text: JSON.stringify({ type: 'profile', data: profile }) });
                         
                         const vid = document.getElementById('cinema-player');
-                        if (vid.src) { // Send current state to newly joined friend
+                        if (vid.src) { // Sync new joiner
                             rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url: vid.src, time: vid.currentTime, isPaused: vid.paused }) });
                         }
                     } else if (data.type === 'movie_load') {
@@ -395,40 +367,37 @@
                         const vid = document.getElementById('cinema-player');
                         const timeDiff = Math.abs(vid.currentTime - data.time);
 
-                        // --- THE REMOTE RECEIVER (FIXED) ---
+                        // --- THE REMOTE RECEIVER ---
                         if (data.action === 'seek' || timeDiff > 4.0) {
-                            if (timeDiff > 0.5) { // Prevent tiny redundant seeks
-                                ignoreNextSeek = true;
+                            if (timeDiff > 0.5) { 
+                                lockSyncForRemote();
                                 vid.currentTime = data.time;
-                                setTimeout(() => { ignoreNextSeek = false; }, 1500); // safety fallback
                             }
                         } 
                         else if (vid.currentTime < data.time && timeDiff > 0.5) {
-                            console.log("🐌 Slightly behind. Soft speed-up to 1.1x...");
                             vid.playbackRate = 1.1; 
                         } 
                         else if (vid.currentTime > data.time && timeDiff > 0.5) {
-                            console.log("🐇 Slightly ahead. Soft slow-down to 0.9x...");
                             vid.playbackRate = 0.9;
                         } 
                         else {
                             if (vid.playbackRate !== 1.0) {
-                                console.log("✅ Synced perfectly. Back to normal speed.");
                                 vid.playbackRate = 1.0;
                             }
                         }
 
-                        // Explicit play/pause triggers that actually check your buffer handlers
-                        if ((data.action === 'play' || data.action === 'resume_from_buffer') && vid.paused) {
-                            ignoreNextPlay = true;
-                            vid.playbackRate = 1.0; 
-                            vid.play().catch(e => console.log(e));
-                            setTimeout(() => { ignoreNextPlay = false; }, 1000);
+                        if (data.action === 'play') {
+                            if (vid.paused) {
+                                lockSyncForRemote();
+                                vid.playbackRate = 1.0; 
+                                vid.play().catch(e => console.log(e));
+                            }
                         }
-                        if ((data.action === 'pause' || data.action === 'pause_for_buffer') && !vid.paused) {
-                            ignoreNextPause = true;
-                            vid.pause();
-                            setTimeout(() => { ignoreNextPause = false; }, 1000);
+                        if (data.action === 'pause') {
+                            if (!vid.paused) {
+                                lockSyncForRemote();
+                                vid.pause();
+                            }
                         }
                     }
                 });
