@@ -159,31 +159,36 @@
         let roomName = new URLSearchParams(window.location.search).get('room');
         if(!roomName) roomName = 'vibe_' + Math.random().toString(36).substr(2, 6);
 
-        // --- THE MASTER REMOTE CONTROL ENGINE ---
-        let isRemoteControl = false;
+        // --- THE MASTER REMOTE CONTROL ENGINE (FIXED) ---
         let isBuffering = false; 
+        
+        // Use explicit flags to prevent endless bouncing loops
+        let ignoreNextSeek = false;
+        let ignoreNextPlay = false;
+        let ignoreNextPause = false;
         
         function setupVideoSync() {
             const vid = document.getElementById('cinema-player');
             
             vid.onplay = () => {
-                if(!isRemoteControl && rtm.channel && !isBuffering) {
+                if (ignoreNextPlay) { ignoreNextPlay = false; return; }
+                if(rtm.channel && !isBuffering) {
                     rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'play', time: vid.currentTime }) });
                 }
             };
             vid.onpause = () => {
-                if(!isRemoteControl && rtm.channel && !isBuffering) {
+                if (ignoreNextPause) { ignoreNextPause = false; return; }
+                if(rtm.channel && !isBuffering) {
                     rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'pause', time: vid.currentTime }) });
                 }
             };
             vid.onseeked = () => {
-                if(!isRemoteControl && rtm.channel) {
+                if (ignoreNextSeek) { ignoreNextSeek = false; return; }
+                if(rtm.channel) {
                     rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'seek', time: vid.currentTime }) });
                 }
             };
-            vid.onended = () => {
-                openMoviePrompt();
-            };
+            vid.onended = () => { openMoviePrompt(); };
 
             // AUTO-PAUSE ON BUFFER
             vid.addEventListener('waiting', () => {
@@ -219,34 +224,57 @@
             const url = document.getElementById('movie-url').value.trim();
             if(!url) return;
             closeMoviePrompt();
-            loadMovie(url);
-            if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url: url }) });
+            loadMovie(url, false, 0); // Start playing at 0 locally
+            if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url: url, isPaused: false, time: 0 }) });
         }
 
-        function loadMovie(url) {
+        function loadMovie(url, startPaused = false, startTime = 0) {
             const vid = document.getElementById('cinema-player');
             let finalStreamUrl = url;
 
-            // SAFE DROPBOX CONVERTER
+            // SAFE DROPBOX & DRIVE CONVERTER
             if (url.includes('dropbox.com')) {
-                if (url.includes('dl=0')) {
-                    finalStreamUrl = url.replace('dl=0', 'raw=1');
-                } else if (!url.includes('raw=1')) {
-                    finalStreamUrl = url + (url.includes('?') ? '&raw=1' : '?raw=1');
-                }
-                console.log("Safe Dropbox link generated!");
+                if (url.includes('dl=0')) finalStreamUrl = url.replace('dl=0', 'raw=1');
+                else if (!url.includes('raw=1')) finalStreamUrl = url + (url.includes('?') ? '&raw=1' : '?raw=1');
             } else if (url.includes('drive.google.com/file/d/')) {
                 const id = url.split('/d/')[1].split('/')[0];
-                if (id) {
-                    finalStreamUrl = `https://drive.google.com/uc?export=download&id=${id}`;
-                    console.log("Safe Drive link generated!");
+                if (id) finalStreamUrl = `https://drive.google.com/uc?export=download&id=${id}`;
+            }
+
+            // Fix: Don't constantly reload if someone new joins the room!
+            if (vid.src === finalStreamUrl || vid.src.includes(finalStreamUrl)) {
+                if (Math.abs(vid.currentTime - startTime) > 2.0) {
+                    ignoreNextSeek = true;
+                    vid.currentTime = startTime;
+                    setTimeout(() => { ignoreNextSeek = false; }, 1000);
                 }
+                if (startPaused && !vid.paused) {
+                    ignoreNextPause = true; vid.pause();
+                    setTimeout(() => { ignoreNextPause = false; }, 1000);
+                } else if (!startPaused && vid.paused) {
+                    ignoreNextPlay = true; vid.play().catch(e=>console.log(e));
+                    setTimeout(() => { ignoreNextPlay = false; }, 1000);
+                }
+                return;
             }
 
             vid.src = finalStreamUrl;
             vid.classList.remove('hidden');
+            
+            // Lock UI so loading doesn't bounce events back
+            ignoreNextPlay = true; ignoreNextPause = true; ignoreNextSeek = true;
             vid.load(); 
-            vid.play().catch(e => console.log("Click play manually! Chrome blocked autoplay."));
+            
+            setTimeout(() => {
+                vid.currentTime = startTime;
+                if (startPaused) {
+                    vid.pause();
+                } else {
+                    vid.play().catch(e => console.log("Click play manually! Chrome blocked autoplay."));
+                }
+                // Unlock
+                setTimeout(() => { ignoreNextPlay = false; ignoreNextPause = false; ignoreNextSeek = false; }, 1000);
+            }, 200);
         }
 
         window.onload = () => {
@@ -358,23 +386,22 @@
                         rtm.channel.sendMessage({ text: JSON.stringify({ type: 'profile', data: profile }) });
                         
                         const vid = document.getElementById('cinema-player');
-                        if (vid.src && !vid.paused) {
-                            rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url: vid.src }) });
-                            setTimeout(() => {
-                                rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'play', time: vid.currentTime }) });
-                            }, 1000);
+                        if (vid.src) { // Send current state to newly joined friend
+                            rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url: vid.src, time: vid.currentTime, isPaused: vid.paused }) });
                         }
                     } else if (data.type === 'movie_load') {
-                        loadMovie(data.url);
+                        loadMovie(data.url, data.isPaused, data.time);
                     } else if (data.type === 'sync') {
                         const vid = document.getElementById('cinema-player');
-                        isRemoteControl = true; 
-                        
                         const timeDiff = Math.abs(vid.currentTime - data.time);
 
-                        // --- NETFLIX SOFT SYNC ENGINE ---
+                        // --- THE REMOTE RECEIVER (FIXED) ---
                         if (data.action === 'seek' || timeDiff > 4.0) {
-                            vid.currentTime = data.time;
+                            if (timeDiff > 0.5) { // Prevent tiny redundant seeks
+                                ignoreNextSeek = true;
+                                vid.currentTime = data.time;
+                                setTimeout(() => { ignoreNextSeek = false; }, 1500); // safety fallback
+                            }
                         } 
                         else if (vid.currentTime < data.time && timeDiff > 0.5) {
                             console.log("🐌 Slightly behind. Soft speed-up to 1.1x...");
@@ -391,15 +418,18 @@
                             }
                         }
 
-                        if (data.action === 'play') {
+                        // Explicit play/pause triggers that actually check your buffer handlers
+                        if ((data.action === 'play' || data.action === 'resume_from_buffer') && vid.paused) {
+                            ignoreNextPlay = true;
                             vid.playbackRate = 1.0; 
-                            vid.play().catch(e=>console.log(e));
+                            vid.play().catch(e => console.log(e));
+                            setTimeout(() => { ignoreNextPlay = false; }, 1000);
                         }
-                        if (data.action === 'pause') {
+                        if ((data.action === 'pause' || data.action === 'pause_for_buffer') && !vid.paused) {
+                            ignoreNextPause = true;
                             vid.pause();
+                            setTimeout(() => { ignoreNextPause = false; }, 1000);
                         }
-
-                        setTimeout(() => { isRemoteControl = false; }, 300);
                     }
                 });
 
@@ -425,7 +455,7 @@
             }
         }
 
-        // UI Controls & Helpers (LINK GENERATOR FIXED HERE)
+        // UI Controls & Helpers
         function copyRoomLink() {
             const link = `${window.location.origin}${window.location.pathname}?room=${roomName}`;
             navigator.clipboard.writeText(link);
