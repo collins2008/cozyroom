@@ -65,7 +65,12 @@
         
         <div id="video-layer" class="absolute inset-0 z-0 bg-black flex items-center justify-center">
             <video id="cinema-player" class="w-full h-full object-contain hidden" controls></video>
+            <button id="tap-to-play" class="hidden absolute z-30 glass px-6 py-4 rounded-2xl font-black text-white text-sm items-center gap-2 shadow-2xl hover:bg-white/10 transition-all">
+                <span class="material-icons">play_circle</span> Tap to Play (browser blocked autoplay)
+            </button>
         </div>
+
+        <div id="network-banner" class="hidden absolute top-6 left-1/2 transform -translate-x-1/2 z-[90] glass px-4 py-2 rounded-xl text-xs font-bold text-yellow-400 shadow-2xl pointer-events-none"></div>
 
         <header id="header-ui" class="absolute top-6 left-6 right-6 flex justify-between items-start z-[60] transition-opacity duration-300 pointer-events-none">
             <div class="flex flex-col gap-3 pointer-events-auto">
@@ -83,6 +88,9 @@
             <div id="video-feeds" class="flex flex-col gap-3 pointer-events-auto items-end">
                 <button onclick="toggleLowData()" id="data-btn" class="glass px-3 py-2 rounded-xl font-bold text-green-500 hover:bg-white/5 transition-all flex items-center gap-2 text-[10px] uppercase tracking-wider">
                     <span class="material-icons text-sm">network_check</span> <span id="data-text">Stable</span>
+                </button>
+                <button onclick="retryMedia()" id="retry-media-btn" class="hidden glass px-3 py-2 rounded-xl font-bold text-red-400 hover:bg-white/5 transition-all flex items-center gap-2 text-[10px] uppercase tracking-wider">
+                    <span class="material-icons text-sm">videocam_off</span> Enable Cam/Mic
                 </button>
                 
                 <div id="local-video-wrapper" class="w-32 h-24 overflow-hidden rounded-xl border border-gray-800 bg-[#0a0a0a] shadow-xl relative">
@@ -121,7 +129,7 @@
                     <div class="w-px h-5 bg-gray-700 mx-1"></div>
                     <button onclick="toggleCinemaMode()" class="text-blue-400 hover:text-blue-300 transition-colors p-1.5" title="Cinema Mode (Hide UI)"><span class="material-icons text-xl">theaters</span></button>
                     <div class="w-px h-5 bg-gray-700 mx-1"></div>
-                    <button onclick="location.reload()" class="text-red-500 hover:text-red-400 p-1.5 transition-colors"><span class="material-icons text-xl">logout</span></button>
+                    <button onclick="exitRoom()" class="text-red-500 hover:text-red-400 p-1.5 transition-colors"><span class="material-icons text-xl">logout</span></button>
                 </div>
             </div>
         </div>
@@ -140,35 +148,73 @@
     </div>
 
     <script>
-        const AGORA_APP_ID = "1200bba1607549c78691da498a9b4d2c"; 
+        // ============================================================
+        // CONFIG / CONSTANTS
+        // ============================================================
+        const AGORA_APP_ID = "1200bba1607549c78691da498a9b4d2c";
 
+        const DEBUG = true; // flip to false to silence [sync]/[net] console logs in production
+        const log = (...args) => { if (DEBUG) console.log(...args); };
+
+        const SYNC_HEARTBEAT_MS = 4000;      // how often a playing peer broadcasts its position
+        const SYNC_HARD_SEEK_DIFF = 4.0;     // seconds of drift that trigger a hard currentTime jump
+        const SYNC_SOFT_DRIFT_DIFF = 0.5;    // seconds of drift that trigger a soft speed-up/slow-down
+        const REMOTE_LOCK_FALLBACK_MS = 3000;// safety unlock if the expected video event never fires
+        const MAX_CHAT_LOG_ENTRIES = 60;     // cap so a long session doesn't bloat the DOM
+        const RTM_REJOIN_RETRY_MS = 3000;    // delay between RTM channel rejoin attempts after a drop
+
+        // ============================================================
+        // STATE
+        // ============================================================
         const rtc = { client: null, localAudioTrack: null, localVideoTrack: null };
         const rtm = { client: null, channel: null };
 
         const myIdNum = Math.floor(Math.random() * 1000000);
-        const myIdStr = myIdNum.toString(); 
+        const myIdStr = myIdNum.toString();
 
         let profile = { name: "Guest", avatar: "duck" };
-        let isLowData = false; let isAudioMuted = false; let isVideoOff = false; let isCinemaMode = false;
-        const avatarMap = { 'duck': '🦆', 'knight': '♘', 'alien': '👾' };
-        
-        let roomName = new URLSearchParams(window.location.search).get('room');
-        if(!roomName) roomName = 'vibe_' + Math.random().toString(36).substr(2, 6);
+        let isLowData = false;
+        let isLowDataAuto = false; // true when low-data was engaged automatically by network-quality, not by hand
+        let isAudioMuted = false;
+        let isVideoOff = false;
+        let isCinemaMode = false;
+        let hasMedia = false; // whether local mic/cam publishing succeeded
 
-        // --- THE MASTER REMOTE CONTROL ENGINE (FIXED) ---
+        const avatarMap = { 'duck': '🦆', 'knight': '♘', 'alien': '👾' };
+
+        let roomName = new URLSearchParams(window.location.search).get('room');
+        if (!roomName) roomName = 'vibe_' + Math.random().toString(36).substr(2, 6);
+
+        // Cache frequently-used DOM nodes once instead of re-querying on every call
+        const dom = {};
+        function cacheDom() {
+            dom.vid = document.getElementById('cinema-player');
+            dom.tapToPlay = document.getElementById('tap-to-play');
+            dom.networkBanner = document.getElementById('network-banner');
+            dom.retryMediaBtn = document.getElementById('retry-media-btn');
+            dom.dataBtn = document.getElementById('data-btn');
+            dom.dataText = document.getElementById('data-text');
+            dom.chatLog = document.getElementById('chat-log');
+            dom.micBtn = document.getElementById('mic-btn');
+            dom.vidBtn = document.getElementById('vid-btn');
+        }
+
+        // ============================================================
+        // REMOTE-CONTROL SYNC ENGINE
+        // ============================================================
+        // Problem this solves: vid.play()/pause() are asynchronous, and their
+        // real 'play'/'pause'/'seeked' events can land late on a slow or
+        // buffering connection. A naive fixed timeout to "ignore my own remote
+        // actions" either unlocks too early (echoing the command back out,
+        // causing a feedback loop) or too late (eating a genuine local click).
+        // So: lock until the SPECIFIC event we're expecting actually fires,
+        // with a generous timeout only as a safety net.
         let isRemoteAction = false;
         let remoteActionTimeout = null;
         let remoteActionListener = null;
 
-        // Locks local events until the ACTUAL play/pause/seeked event fires
-        // (not a guessed fixed delay). This is what stops the feedback loop:
-        // vid.play()/pause() are async, and on a slow/buffering connection the
-        // real event can land well after a fixed timeout would have already
-        // re-armed broadcasting, causing an echoed command to bounce back out.
-        // A generous fallback timeout still exists in case the event never fires
-        // (e.g. autoplay gets blocked and 'play' never actually happens).
-        function lockSyncForRemote(eventName, fallbackMs = 3000) {
-            const vid = document.getElementById('cinema-player');
+        function lockSyncForRemote(eventName, fallbackMs = REMOTE_LOCK_FALLBACK_MS) {
+            const vid = dom.vid;
             isRemoteAction = true;
 
             clearTimeout(remoteActionTimeout);
@@ -193,57 +239,105 @@
             remoteActionTimeout = setTimeout(clear, fallbackMs);
         }
 
+        function broadcastSync(action, extra = {}) {
+            if (isRemoteAction || !rtm.channel) return;
+            const payload = { type: 'sync', action, time: dom.vid.currentTime, ...extra };
+            log('[sync] sending', action, payload.time);
+            rtm.channel.sendMessage({ text: JSON.stringify(payload) })
+                .catch(err => console.error('[sync] send failed:', action, err));
+        }
+
         function setupVideoSync() {
-            const vid = document.getElementById('cinema-player');
+            const vid = dom.vid;
 
-            vid.addEventListener('play', () => {
-                if (isRemoteAction) return;
-                if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'play', time: vid.currentTime }) });
+            vid.addEventListener('play', () => broadcastSync('play'));
+            vid.addEventListener('pause', () => broadcastSync('pause'));
+            vid.addEventListener('seeked', () => broadcastSync('seek'));
+
+            // Autoplay was blocked by the browser -> show a manual "tap to play" button
+            // instead of silently failing (this used to just console.log and leave the
+            // viewer staring at a paused black screen with no explanation).
+            vid.addEventListener('play', () => dom.tapToPlay.classList.add('hidden'));
+            vid.addEventListener('error', () => {
+                appendLog('System', 'Video failed to load. Check the link is a direct, publicly shared file.');
             });
 
-            vid.addEventListener('pause', () => {
-                if (isRemoteAction) return;
-                if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'pause', time: vid.currentTime }) });
-            });
-
-            vid.addEventListener('seeked', () => {
-                if (isRemoteAction) return;
-                if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'seek', time: vid.currentTime }) });
-            });
-
-            // THE BACKGROUND HEARTBEAT - Keeps everyone perfectly aligned
+            // Background heartbeat: while playing, periodically broadcast position so
+            // late joiners / anyone who drifted can softly re-sync without a hard jump.
             setInterval(() => {
                 if (!vid.paused && rtm.channel && !isRemoteAction) {
                     rtm.channel.sendMessage({ text: JSON.stringify({ type: 'sync', action: 'heartbeat_check', time: vid.currentTime }) });
                 }
-            }, 4000);
+            }, SYNC_HEARTBEAT_MS);
         }
 
+        /** Applies an incoming 'sync' message from a peer: drift correction + play/pause. */
+        function handleIncomingSync(data) {
+            const vid = dom.vid;
+            const timeDiff = Math.abs(vid.currentTime - data.time);
+            log('[sync] received', data.action, data.time, 'diff', timeDiff.toFixed(2));
+
+            if (data.action === 'seek' || timeDiff > SYNC_HARD_SEEK_DIFF) {
+                if (timeDiff > SYNC_SOFT_DRIFT_DIFF) {
+                    lockSyncForRemote('seeked');
+                    vid.currentTime = data.time;
+                }
+            } else if (vid.currentTime < data.time && timeDiff > SYNC_SOFT_DRIFT_DIFF) {
+                vid.playbackRate = 1.1; // slightly behind: nudge forward instead of a jarring jump
+            } else if (vid.currentTime > data.time && timeDiff > SYNC_SOFT_DRIFT_DIFF) {
+                vid.playbackRate = 0.9; // slightly ahead: ease back
+            } else if (vid.playbackRate !== 1.0) {
+                vid.playbackRate = 1.0; // back in sync, normal speed
+            }
+
+            if (data.action === 'play' && vid.paused) {
+                lockSyncForRemote('play');
+                vid.playbackRate = 1.0;
+                vid.play().catch(() => {
+                    isRemoteAction = false; // play() failed (autoplay block) — don't leave the lock stuck
+                    dom.tapToPlay.classList.remove('hidden');
+                    dom.tapToPlay.classList.add('flex');
+                });
+            }
+            if (data.action === 'pause' && !vid.paused) {
+                lockSyncForRemote('pause');
+                vid.pause();
+            }
+        }
+
+        // ============================================================
+        // MOVIE LOADING
+        // ============================================================
         function openMoviePrompt() { document.getElementById('movie-modal').classList.remove('hidden'); }
         function closeMoviePrompt() { document.getElementById('movie-modal').classList.add('hidden'); }
 
+        function toDirectStreamUrl(url) {
+            if (url.includes('dropbox.com')) {
+                if (url.includes('dl=0')) return url.replace('dl=0', 'raw=1');
+                if (!url.includes('raw=1')) return url + (url.includes('?') ? '&raw=1' : '?raw=1');
+                return url;
+            }
+            if (url.includes('drive.google.com/file/d/')) {
+                const id = url.split('/d/')[1]?.split('/')[0];
+                if (id) return `https://drive.google.com/uc?export=download&id=${id}`;
+            }
+            return url;
+        }
+
         function broadcastMovie() {
             const url = document.getElementById('movie-url').value.trim();
-            if(!url) return;
+            if (!url) return;
             closeMoviePrompt();
-            loadMovie(url, false, 0); 
-            if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url: url, isPaused: false, time: 0 }) });
+            loadMovie(url, false, 0);
+            if (rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url, isPaused: false, time: 0 }) });
         }
 
         function loadMovie(url, startPaused = false, startTime = 0) {
-            const vid = document.getElementById('cinema-player');
-            let finalStreamUrl = url;
+            const vid = dom.vid;
+            const finalStreamUrl = toDirectStreamUrl(url);
 
-            if (url.includes('dropbox.com')) {
-                if (url.includes('dl=0')) finalStreamUrl = url.replace('dl=0', 'raw=1');
-                else if (!url.includes('raw=1')) finalStreamUrl = url + (url.includes('?') ? '&raw=1' : '?raw=1');
-            } else if (url.includes('drive.google.com/file/d/')) {
-                const id = url.split('/d/')[1].split('/')[0];
-                if (id) finalStreamUrl = `https://drive.google.com/uc?export=download&id=${id}`;
-            }
-
-            // If the movie is already loaded, just sync the time/state
-            if (vid.src === finalStreamUrl || vid.src.includes(finalStreamUrl)) {
+            // Movie already loaded -> just reconcile time/paused state, don't reload the src
+            if (vid.src === finalStreamUrl || (vid.src && vid.src.includes(finalStreamUrl))) {
                 if (Math.abs(vid.currentTime - startTime) > 2.0) {
                     lockSyncForRemote('seeked');
                     vid.currentTime = startTime;
@@ -253,39 +347,60 @@
                     vid.pause();
                 } else if (!startPaused && vid.paused) {
                     lockSyncForRemote('play');
-                    vid.play().catch(e=>console.log(e));
+                    vid.play().catch(() => { dom.tapToPlay.classList.remove('hidden'); dom.tapToPlay.classList.add('flex'); });
                 }
                 return;
             }
 
             vid.src = finalStreamUrl;
             vid.classList.remove('hidden');
+            dom.tapToPlay.classList.add('hidden');
 
-            lockSyncForRemote(null); // no single event to wait for during load(); fallback timeout covers it
-            vid.load(); 
-            
+            lockSyncForRemote(null); // load() doesn't map to a single event; fallback timeout covers it
+            vid.load();
+
             setTimeout(() => {
-                lockSyncForRemote(startPaused ? 'pause' : 'play'); // renew lock, wait for the real state-change event
+                lockSyncForRemote(startPaused ? 'pause' : 'play');
                 vid.currentTime = startTime;
                 if (startPaused) {
                     vid.pause();
                 } else {
-                    vid.play().catch(e => console.log("Click play manually! Chrome blocked autoplay."));
+                    vid.play().catch(() => {
+                        isRemoteAction = false;
+                        dom.tapToPlay.classList.remove('hidden');
+                        dom.tapToPlay.classList.add('flex');
+                    });
                 }
             }, 300);
         }
 
+        // ============================================================
+        // BOOTSTRAP
+        // ============================================================
         window.onload = () => {
+            cacheDom();
+            bindStaticUI();
+
             const statusEl = document.getElementById('room-status');
             const joinBtn = document.getElementById('join-btn');
             if (typeof AgoraRTC === 'undefined' || typeof AgoraRTM === 'undefined') {
                 statusEl.innerText = "ERROR: NETWORK BLOCKED AGORA! Turn on VPN.";
-                statusEl.classList.replace('text-blue-500', 'text-red-500'); return;
+                statusEl.classList.replace('text-blue-500', 'text-red-500');
+                return;
             }
             statusEl.innerText = "AGORA ENGINE READY";
             statusEl.classList.replace('text-blue-500', 'text-green-500');
             joinBtn.disabled = false;
         };
+
+        function bindStaticUI() {
+            dom.tapToPlay.addEventListener('click', () => {
+                dom.vid.play().then(() => {
+                    dom.tapToPlay.classList.add('hidden');
+                    dom.tapToPlay.classList.remove('flex');
+                }).catch(err => console.error('Manual play failed:', err));
+            });
+        }
 
         function selectAvatar(type) {
             profile.avatar = type;
@@ -293,13 +408,23 @@
             document.getElementById(`btn-${type}`).classList.replace('border-transparent', 'border-blue-500');
         }
 
+        function showNetworkBanner(msg, autoHideMs = 0) {
+            dom.networkBanner.innerText = msg;
+            dom.networkBanner.classList.remove('hidden');
+            if (autoHideMs > 0) setTimeout(() => dom.networkBanner.classList.add('hidden'), autoHideMs);
+        }
+        function hideNetworkBanner() { dom.networkBanner.classList.add('hidden'); }
+
+        // ============================================================
+        // JOIN FLOW
+        // ============================================================
         async function enterSpace() {
             if (AGORA_APP_ID === "YOUR_COZYROOM_APP_ID_HERE") {
                 alert("Omo! Paste your CozyRoom App ID in the code first! 😭"); return;
             }
 
             const inputName = document.getElementById('username').value.trim();
-            if(inputName) profile.name = inputName;
+            if (inputName) profile.name = inputName;
 
             document.getElementById('login-screen').style.opacity = '0';
             setTimeout(() => {
@@ -308,149 +433,230 @@
                 spawnAvatarUI(myIdStr, profile.name, profile.avatar, true);
             }, 500);
 
+            // --- RTC (video/voice) setup ---
             try {
                 rtc.client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
-                
-                rtc.client.enableAudioVolumeIndicator();
-                rtc.client.on("volume-indicator", volumes => {
-                    volumes.forEach((volume) => {
-                        const ring = document.getElementById(`ring-${volume.uid}`);
-                        if (ring) {
-                            if (volume.level > 10) ring.classList.add('speaking');
-                            else ring.classList.remove('speaking');
-                        }
-                    });
+                wireRtcClientEvents(rtc.client);
+
+                // Surface reconnects instead of failing silently mid-session
+                rtc.client.on("connection-state-change", (curState, prevState, reason) => {
+                    log('[net] RTC connection-state-change', prevState, '->', curState, reason);
+                    if (curState === 'RECONNECTING') showNetworkBanner('Reconnecting video/voice…');
+                    else if (curState === 'CONNECTED') { hideNetworkBanner(); appendLog('System', 'Voice/video reconnected.'); }
+                    else if (curState === 'DISCONNECTED' && prevState !== 'DISCONNECTED') showNetworkBanner('Voice/video disconnected.', 5000);
                 });
 
-                rtc.client.on("user-published", async (user, mediaType) => {
-                    await rtc.client.subscribe(user, mediaType);
-                    
-                    if (mediaType === "video") {
-                        const wrapper = document.getElementById("remote-video-container");
-                        
-                        let box = document.getElementById(`remote-box-${user.uid}`);
-                        if (!box) {
-                            box = document.createElement("div");
-                            box.id = `remote-box-${user.uid}`;
-                            box.className = "w-32 h-24 overflow-hidden rounded-xl border border-gray-800 bg-[#0a0a0a] shadow-xl relative";
-                            
-                            let label = document.createElement("span");
-                            label.className = "absolute bottom-1 left-1 text-[8px] bg-black/70 px-1 rounded text-white z-10 pointer-events-none";
-                            label.innerText = "Friend";
-                            
-                            let player = document.createElement("div");
-                            player.id = `remote-video-${user.uid}`;
-                            player.className = "w-full h-full";
-                            
-                            box.appendChild(player);
-                            box.appendChild(label);
-                            wrapper.appendChild(box);
-                        }
-                        user.videoTrack.play(`remote-video-${user.uid}`, { fit: "cover" });
-                    }
-                    if (mediaType === "audio") {
-                        user.audioTrack.play();
+                // Network quality drives an automatic low-data suggestion, without
+                // fighting a manual override the person already chose.
+                rtc.client.on("network-quality", (stats) => {
+                    const poor = stats.uplinkNetworkQuality >= 4 || stats.downlinkNetworkQuality >= 4; // 1=best .. 6=worst
+                    if (poor && !isLowData) {
+                        setLowData(true, true);
+                        appendLog('System', 'Weak network detected — switched to Low Data mode.');
+                    } else if (!poor && isLowData && isLowDataAuto) {
+                        setLowData(false, true);
                     }
                 });
+            } catch (err) {
+                console.error("Fatal RTC init error:", err);
+                appendLog("System Error", "Could not initialize video engine: " + err.message);
+            }
 
-                rtc.client.on("user-unpublished", (user, mediaType) => {
-                    if(mediaType === "video") {
-                        const box = document.getElementById(`remote-box-${user.uid}`);
-                        if(box) box.remove();
-                    }
-                });
-
-                rtc.client.on("user-left", (user) => {
-                    const el = document.getElementById(`avatar-${user.uid}`);
-                    if(el) el.remove();
-                    const box = document.getElementById(`remote-box-${user.uid}`);
-                    if(box) box.remove();
-                    appendLog("System", "Someone disconnected.");
-                });
-
+            // --- RTM (chat/sync signaling) setup ---
+            try {
                 rtm.client = AgoraRTM.createInstance(AGORA_APP_ID);
-                await rtm.client.login({ uid: myIdStr });
-                rtm.channel = rtm.client.createChannel(roomName);
-                await rtm.channel.join();
 
-                rtm.channel.on('ChannelMessage', ({ text }, senderId) => {
-                    const data = JSON.parse(text);
-                    if(data.type === 'profile') {
-                        spawnAvatarUI(senderId, data.data.name, data.data.avatar, false);
-                    } else if(data.type === 'chat') {
-                        showSpeechBubble(senderId, data.msg);
-                        appendLog(data.sender, data.msg);
-                    } else if(data.type === 'request_profiles') {
-                        rtm.channel.sendMessage({ text: JSON.stringify({ type: 'profile', data: profile }) });
-                        
-                        const vid = document.getElementById('cinema-player');
-                        if (vid.src) { // Sync new joiner
-                            rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url: vid.src, time: vid.currentTime, isPaused: vid.paused }) });
-                        }
-                    } else if (data.type === 'movie_load') {
-                        loadMovie(data.url, data.isPaused, data.time);
-                    } else if (data.type === 'sync') {
-                        const vid = document.getElementById('cinema-player');
-                        const timeDiff = Math.abs(vid.currentTime - data.time);
-
-                        // --- THE REMOTE RECEIVER ---
-                        if (data.action === 'seek' || timeDiff > 4.0) {
-                            if (timeDiff > 0.5) { 
-                                lockSyncForRemote('seeked');
-                                vid.currentTime = data.time;
-                            }
-                        } 
-                        else if (vid.currentTime < data.time && timeDiff > 0.5) {
-                            vid.playbackRate = 1.1; 
-                        } 
-                        else if (vid.currentTime > data.time && timeDiff > 0.5) {
-                            vid.playbackRate = 0.9;
-                        } 
-                        else {
-                            if (vid.playbackRate !== 1.0) {
-                                vid.playbackRate = 1.0;
-                            }
-                        }
-
-                        if (data.action === 'play') {
-                            if (vid.paused) {
-                                lockSyncForRemote('play');
-                                vid.playbackRate = 1.0; 
-                                vid.play().catch(e => console.log(e));
-                            }
-                        }
-                        if (data.action === 'pause') {
-                            if (!vid.paused) {
-                                lockSyncForRemote('pause');
-                                vid.pause();
-                            }
-                        }
+                rtm.client.on('ConnectionStateChanged', (state, reason) => {
+                    log('[net] RTM ConnectionStateChanged', state, reason);
+                    if (state === 'RECONNECTING') {
+                        showNetworkBanner('Reconnecting chat/sync…');
+                    } else if (state === 'CONNECTED') {
+                        hideNetworkBanner();
+                    } else if (state === 'ABORTED') {
+                        // Server forced us out (e.g. logged in elsewhere) — don't silently sit disconnected
+                        showNetworkBanner('Disconnected from room. Please rejoin.', 8000);
                     }
                 });
 
-                await rtc.client.join(AGORA_APP_ID, roomName, null, myIdNum);
+                await rtm.client.login({ uid: myIdStr });
+                await joinRtmChannel(); // separated out so we can retry it on drop
+            } catch (err) {
+                console.error("Fatal RTM init error:", err);
+                appendLog("System Error", "Could not connect chat/sync: " + err.message + " (video call may still work).");
+            }
 
-                rtc.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
-                rtc.localVideoTrack = await AgoraRTC.createCameraVideoTrack({
-                    encoderConfig: "240p_1" 
-                });
+            // --- RTC channel join + publish (independent of RTM outcome above) ---
+            if (rtc.client) {
+                try {
+                    await rtc.client.join(AGORA_APP_ID, roomName, null, myIdNum);
+                } catch (err) {
+                    console.error("RTC join failed:", err);
+                    appendLog("System Error", "Could not join voice/video channel: " + err.message);
+                }
 
-                rtc.localVideoTrack.play("local-video");
-                await rtc.client.publish([rtc.localAudioTrack, rtc.localVideoTrack]);
+                // Mic/camera are isolated from everything else: a permission denial or
+                // missing device here must NOT prevent chat/sync from being wired up.
+                try {
+                    rtc.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+                    rtc.localVideoTrack = await AgoraRTC.createCameraVideoTrack({ encoderConfig: "240p_1" });
+                    rtc.localVideoTrack.play("local-video");
+                    await rtc.client.publish([rtc.localAudioTrack, rtc.localVideoTrack]);
+                    hasMedia = true;
+                } catch (mediaErr) {
+                    console.error("Media device error (mic/cam):", mediaErr);
+                    appendLog("System", "Mic/camera unavailable (" + mediaErr.message + "). You've joined without audio/video.");
+                    dom.retryMediaBtn.classList.remove('hidden');
+                    dom.retryMediaBtn.classList.add('flex');
+                }
+            }
 
+            if (rtm.channel) {
                 rtm.channel.sendMessage({ text: JSON.stringify({ type: 'profile', data: profile }) });
                 rtm.channel.sendMessage({ text: JSON.stringify({ type: 'request_profiles' }) });
+            }
 
-                setupVideoSync();
-                appendLog("System", "Connected via Agora Premium Network.");
+            setupVideoSync();
+            appendLog("System", "Connected via Agora.");
+        }
 
+        /** Joins (or rejoins) the RTM channel and wires the message handler. Idempotent. */
+        async function joinRtmChannel() {
+            rtm.channel = rtm.client.createChannel(roomName);
+            await rtm.channel.join();
+
+            rtm.channel.on('ChannelMessage', ({ text }, senderId) => {
+                let data;
+                try { data = JSON.parse(text); } catch { return; }
+
+                switch (data.type) {
+                    case 'profile':
+                        spawnAvatarUI(senderId, data.data.name, data.data.avatar, false);
+                        break;
+                    case 'chat':
+                        showSpeechBubble(senderId, data.msg);
+                        appendLog(data.sender, data.msg);
+                        break;
+                    case 'request_profiles': {
+                        rtm.channel.sendMessage({ text: JSON.stringify({ type: 'profile', data: profile }) });
+                        const vid = dom.vid;
+                        if (vid.src) {
+                            rtm.channel.sendMessage({ text: JSON.stringify({ type: 'movie_load', url: vid.src, time: vid.currentTime, isPaused: vid.paused }) });
+                        }
+                        break;
+                    }
+                    case 'movie_load':
+                        loadMovie(data.url, data.isPaused, data.time);
+                        break;
+                    case 'sync':
+                        handleIncomingSync(data);
+                        break;
+                }
+            });
+
+            rtm.channel.on('MemberLeft', (memberId) => {
+                const el = document.getElementById(`avatar-${memberId}`);
+                if (el) el.remove();
+            });
+        }
+
+        function wireRtcClientEvents(client) {
+            client.enableAudioVolumeIndicator();
+            client.on("volume-indicator", volumes => {
+                volumes.forEach((volume) => {
+                    const ring = document.getElementById(`ring-${volume.uid}`);
+                    if (ring) ring.classList.toggle('speaking', volume.level > 10);
+                });
+            });
+
+            client.on("user-published", async (user, mediaType) => {
+                await client.subscribe(user, mediaType);
+
+                if (mediaType === "video") {
+                    const wrapper = document.getElementById("remote-video-container");
+                    let box = document.getElementById(`remote-box-${user.uid}`);
+                    if (!box) {
+                        box = document.createElement("div");
+                        box.id = `remote-box-${user.uid}`;
+                        box.className = "w-32 h-24 overflow-hidden rounded-xl border border-gray-800 bg-[#0a0a0a] shadow-xl relative";
+
+                        const label = document.createElement("span");
+                        label.className = "absolute bottom-1 left-1 text-[8px] bg-black/70 px-1 rounded text-white z-10 pointer-events-none";
+                        label.innerText = "Friend";
+
+                        const player = document.createElement("div");
+                        player.id = `remote-video-${user.uid}`;
+                        player.className = "w-full h-full";
+
+                        box.appendChild(player);
+                        box.appendChild(label);
+                        wrapper.appendChild(box);
+                    }
+                    user.videoTrack.play(`remote-video-${user.uid}`, { fit: "cover" });
+                }
+                if (mediaType === "audio") user.audioTrack.play();
+            });
+
+            client.on("user-unpublished", (user, mediaType) => {
+                if (mediaType === "video") {
+                    const box = document.getElementById(`remote-box-${user.uid}`);
+                    if (box) box.remove();
+                }
+            });
+
+            client.on("user-left", (user) => {
+                const el = document.getElementById(`avatar-${user.uid}`);
+                if (el) el.remove();
+                const box = document.getElementById(`remote-box-${user.uid}`);
+                if (box) box.remove();
+                appendLog("System", "Someone disconnected.");
+            });
+        }
+
+        /** Lets someone retry mic/cam access after an initial denial, without rejoining the whole room. */
+        async function retryMedia() {
+            if (!rtc.client) return;
+            try {
+                rtc.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+                rtc.localVideoTrack = await AgoraRTC.createCameraVideoTrack({ encoderConfig: "240p_1" });
+                rtc.localVideoTrack.play("local-video");
+                await rtc.client.publish([rtc.localAudioTrack, rtc.localVideoTrack]);
+                hasMedia = true;
+                dom.retryMediaBtn.classList.add('hidden');
+                dom.retryMediaBtn.classList.remove('flex');
+                appendLog("System", "Camera/mic connected.");
             } catch (err) {
-                console.error("Agora Error:", err);
-                appendLog("System Error", err.message);
+                console.error("Retry media failed:", err);
+                appendLog("System", "Still couldn't access mic/cam: " + err.message + ". Check your browser's site permissions.");
             }
         }
 
-        // UI Controls & Helpers
+        /** Cleanly leaves the room: unpublish tracks, close them, leave RTC + RTM. */
+        async function leaveRoom() {
+            try {
+                if (rtc.localAudioTrack) { rtc.localAudioTrack.close(); }
+                if (rtc.localVideoTrack) { rtc.localVideoTrack.close(); }
+                if (rtc.client) await rtc.client.leave();
+            } catch (e) { console.warn('RTC leave cleanup error:', e); }
+            try {
+                if (rtm.channel) await rtm.channel.leave();
+                if (rtm.client) await rtm.client.logout();
+            } catch (e) { console.warn('RTM leave cleanup error:', e); }
+        }
+
+        window.addEventListener('beforeunload', () => {
+            // Best-effort — browsers give unload handlers very little time,
+            // but this at least fires the leave requests instead of just
+            // letting the connection time out on the server side.
+            leaveRoom();
+        });
+
+        function exitRoom() {
+            leaveRoom().finally(() => location.reload());
+        }
+
+        // ============================================================
+        // UI CONTROLS
+        // ============================================================
         function copyRoomLink() {
             const link = `${window.location.origin}${window.location.pathname}?room=${roomName}`;
             navigator.clipboard.writeText(link);
@@ -481,28 +687,34 @@
         }
 
         function toggleMic() {
+            if (!hasMedia) { retryMedia(); return; }
             isAudioMuted = !isAudioMuted;
-            if(rtc.localAudioTrack) rtc.localAudioTrack.setMuted(isAudioMuted);
-            document.getElementById('mic-btn').innerHTML = `<span class="material-icons text-xl ${isAudioMuted ? 'text-red-500' : 'text-gray-400 hover:text-white'}">${isAudioMuted ? 'mic_off' : 'mic'}</span>`;
+            if (rtc.localAudioTrack) rtc.localAudioTrack.setMuted(isAudioMuted);
+            dom.micBtn.innerHTML = `<span class="material-icons text-xl ${isAudioMuted ? 'text-red-500' : 'text-gray-400 hover:text-white'}">${isAudioMuted ? 'mic_off' : 'mic'}</span>`;
         }
 
         function toggleVid() {
-            if(isLowData) return; 
+            if (!hasMedia) { retryMedia(); return; }
+            if (isLowData) return;
             isVideoOff = !isVideoOff;
-            if(rtc.localVideoTrack) rtc.localVideoTrack.setMuted(isVideoOff);
-            document.getElementById('vid-btn').innerHTML = `<span class="material-icons text-xl ${isVideoOff ? 'text-red-500' : 'text-gray-400 hover:text-white'}">${isVideoOff ? 'videocam_off' : 'videocam'}</span>`;
+            if (rtc.localVideoTrack) rtc.localVideoTrack.setMuted(isVideoOff);
+            dom.vidBtn.innerHTML = `<span class="material-icons text-xl ${isVideoOff ? 'text-red-500' : 'text-gray-400 hover:text-white'}">${isVideoOff ? 'videocam_off' : 'videocam'}</span>`;
         }
 
-        function toggleLowData() {
-            isLowData = !isLowData;
-            const btn = document.getElementById('data-btn');
-            const text = document.getElementById('data-text');
-            if (isLowData) {
-                btn.classList.replace('text-green-500', 'text-red-500'); text.innerText = "Low Data";
-                if(rtc.localVideoTrack) rtc.localVideoTrack.setEnabled(false);
+        function toggleLowData() { setLowData(!isLowData, false); }
+
+        /** @param auto - true if the network-quality listener triggered this, not a manual click */
+        function setLowData(enabled, auto) {
+            isLowData = enabled;
+            isLowDataAuto = enabled ? auto : false;
+            if (enabled) {
+                dom.dataBtn.classList.replace('text-green-500', 'text-red-500');
+                dom.dataText.innerText = auto ? "Low Data (auto)" : "Low Data";
+                if (rtc.localVideoTrack) rtc.localVideoTrack.setEnabled(false);
             } else {
-                btn.classList.replace('text-red-500', 'text-green-500'); text.innerText = "Stable";
-                if(rtc.localVideoTrack && !isVideoOff) rtc.localVideoTrack.setEnabled(true);
+                dom.dataBtn.classList.replace('text-red-500', 'text-green-500');
+                dom.dataText.innerText = "Stable";
+                if (rtc.localVideoTrack && !isVideoOff) rtc.localVideoTrack.setEnabled(true);
             }
         }
 
@@ -510,28 +722,29 @@
             e.preventDefault();
             const input = document.getElementById('chat-input');
             const msg = input.value.trim();
-            if(!msg) return;
+            if (!msg) return;
 
             showSpeechBubble(myIdStr, msg);
             appendLog("You", msg);
-            if(rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'chat', msg: msg, sender: profile.name }) });
+            if (rtm.channel) rtm.channel.sendMessage({ text: JSON.stringify({ type: 'chat', msg, sender: profile.name }) });
             input.value = '';
         }
 
         function appendLog(sender, msg) {
-            const log = document.getElementById('chat-log');
+            const log = dom.chatLog;
             const entry = document.createElement('div');
             entry.innerHTML = `<span class="text-white/50">${sender}:</span> <span class="text-white">${msg}</span>`;
             log.appendChild(entry);
+            while (log.children.length > MAX_CHAT_LOG_ENTRIES) log.removeChild(log.firstChild);
             log.scrollTop = log.scrollHeight;
         }
 
         function showSpeechBubble(peerId, text) {
             const container = document.getElementById(`avatar-inner-${peerId}`);
-            if(!container) return;
+            if (!container) return;
 
             const old = container.querySelector('.speech-bubble');
-            if(old) old.remove();
+            if (old) old.remove();
 
             const bubble = document.createElement('div');
             bubble.className = 'speech-bubble absolute -top-10 left-1/2 transform -translate-x-1/2 bg-white text-black px-3 py-1 rounded-xl font-bold shadow-2xl whitespace-nowrap z-50 text-[10px] transition-all';
@@ -541,7 +754,7 @@
             bubble.appendChild(pointer);
 
             container.appendChild(bubble);
-            setTimeout(() => { if(bubble.parentNode) bubble.remove(); }, 5000);
+            setTimeout(() => { if (bubble.parentNode) bubble.remove(); }, 5000);
         }
 
         function makeDraggable(element) {
@@ -549,7 +762,7 @@
             element.onmousedown = dragMouseDown;
             function dragMouseDown(e) {
                 e = e || window.event;
-                if(e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
                 e.preventDefault();
                 startX = e.clientX; startY = e.clientY;
                 document.querySelectorAll('.draggable-avatar').forEach(el => el.style.zIndex = '20');
@@ -569,16 +782,16 @@
 
         function spawnAvatarUI(id, name, avatarType, isLocal) {
             const space = document.getElementById('avatar-space');
-            if(document.getElementById(`avatar-${id}`)) return; 
+            if (document.getElementById(`avatar-${id}`)) return;
 
             const outerWrapper = document.createElement('div');
             outerWrapper.id = `avatar-${id}`;
             outerWrapper.className = `draggable-avatar pointer-events-auto`;
-            
+
             const centerX = window.innerWidth / 2; const centerY = window.innerHeight / 2;
-            const offsetX = isLocal ? -40 : 40; 
-            
-            outerWrapper.style.left = `${(centerX + offsetX) - 30}px`; 
+            const offsetX = isLocal ? -40 : 40;
+
+            outerWrapper.style.left = `${(centerX + offsetX) - 30}px`;
             outerWrapper.style.top = `${centerY - 30}px`;
 
             const innerWrapper = document.createElement('div');
