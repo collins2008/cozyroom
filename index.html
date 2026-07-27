@@ -158,13 +158,39 @@
         // --- THE MASTER REMOTE CONTROL ENGINE (FIXED) ---
         let isRemoteAction = false;
         let remoteActionTimeout = null;
+        let remoteActionListener = null;
 
-        // This locks local events for 800ms when a command is received
-        // so that the browser reacting doesn't accidentally send a command back!
-        function lockSyncForRemote() {
+        // Locks local events until the ACTUAL play/pause/seeked event fires
+        // (not a guessed fixed delay). This is what stops the feedback loop:
+        // vid.play()/pause() are async, and on a slow/buffering connection the
+        // real event can land well after a fixed timeout would have already
+        // re-armed broadcasting, causing an echoed command to bounce back out.
+        // A generous fallback timeout still exists in case the event never fires
+        // (e.g. autoplay gets blocked and 'play' never actually happens).
+        function lockSyncForRemote(eventName, fallbackMs = 3000) {
+            const vid = document.getElementById('cinema-player');
             isRemoteAction = true;
+
             clearTimeout(remoteActionTimeout);
-            remoteActionTimeout = setTimeout(() => { isRemoteAction = false; }, 800);
+            if (remoteActionListener) {
+                vid.removeEventListener(remoteActionListener.event, remoteActionListener.fn);
+                remoteActionListener = null;
+            }
+
+            const clear = () => {
+                isRemoteAction = false;
+                clearTimeout(remoteActionTimeout);
+                if (remoteActionListener) {
+                    vid.removeEventListener(remoteActionListener.event, remoteActionListener.fn);
+                    remoteActionListener = null;
+                }
+            };
+
+            if (eventName) {
+                vid.addEventListener(eventName, clear, { once: true });
+                remoteActionListener = { event: eventName, fn: clear };
+            }
+            remoteActionTimeout = setTimeout(clear, fallbackMs);
         }
 
         function setupVideoSync() {
@@ -219,14 +245,14 @@
             // If the movie is already loaded, just sync the time/state
             if (vid.src === finalStreamUrl || vid.src.includes(finalStreamUrl)) {
                 if (Math.abs(vid.currentTime - startTime) > 2.0) {
-                    lockSyncForRemote();
+                    lockSyncForRemote('seeked');
                     vid.currentTime = startTime;
                 }
                 if (startPaused && !vid.paused) {
-                    lockSyncForRemote(); 
+                    lockSyncForRemote('pause');
                     vid.pause();
                 } else if (!startPaused && vid.paused) {
-                    lockSyncForRemote(); 
+                    lockSyncForRemote('play');
                     vid.play().catch(e=>console.log(e));
                 }
                 return;
@@ -234,12 +260,12 @@
 
             vid.src = finalStreamUrl;
             vid.classList.remove('hidden');
-            
-            lockSyncForRemote();
+
+            lockSyncForRemote(null); // no single event to wait for during load(); fallback timeout covers it
             vid.load(); 
             
             setTimeout(() => {
-                lockSyncForRemote(); // Renew lock before state change
+                lockSyncForRemote(startPaused ? 'pause' : 'play'); // renew lock, wait for the real state-change event
                 vid.currentTime = startTime;
                 if (startPaused) {
                     vid.pause();
@@ -370,7 +396,7 @@
                         // --- THE REMOTE RECEIVER ---
                         if (data.action === 'seek' || timeDiff > 4.0) {
                             if (timeDiff > 0.5) { 
-                                lockSyncForRemote();
+                                lockSyncForRemote('seeked');
                                 vid.currentTime = data.time;
                             }
                         } 
@@ -388,14 +414,14 @@
 
                         if (data.action === 'play') {
                             if (vid.paused) {
-                                lockSyncForRemote();
+                                lockSyncForRemote('play');
                                 vid.playbackRate = 1.0; 
                                 vid.play().catch(e => console.log(e));
                             }
                         }
                         if (data.action === 'pause') {
                             if (!vid.paused) {
-                                lockSyncForRemote();
+                                lockSyncForRemote('pause');
                                 vid.pause();
                             }
                         }
